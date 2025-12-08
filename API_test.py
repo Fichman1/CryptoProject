@@ -108,3 +108,5 @@ if __name__ == "__main__": #what to collect
     df = loader.fetch_history(start_str='2017-09-09')
     print(df.head())
     print(df.tail())
+    
+    
