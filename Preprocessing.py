@@ -5,7 +5,7 @@ import joblib
 import os
 
 # --- הגדרות ---
-DATA_PATH = 'data/BTCUSDT_1h_data.csv'  # הנתיב לקובץ שיצרנו בשלב הקודם
+DATA_PATH = 'data/BTCUSDT_5m_data.csv'  # הנתיב לקובץ שיצרנו בשלב הקודם
 SEQ_LENGTH = 60  # אורך החלון (כמה נרות אחורה המודל רואה כדי לחזות)
 PREDICT_AHEAD = 1 # כמה צעדים קדימה חוזים (1 = הנר הבא)
 TRAIN_SPLIT = 0.8 # 80% לאימון
