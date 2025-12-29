@@ -5,7 +5,12 @@ from torch.utils.data import TensorDataset, DataLoader
 import numpy as np
 import os
 import matplotlib.pyplot as plt
-from sklearn.metrics import mean_squared_error, r2_score
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, TensorDataset
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+import joblib
 
 # --- הגדרות ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -20,43 +25,58 @@ HIDDEN_DIM = 64
 NUM_LAYERS = 2
 DROPOUT = 0.2
 
-# בדיקה אם יש GPU זמין (מאיץ משמעותית את האימון)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using device: {device}")
-
-# --- 1. הגדרת המודל (PyTorch Style) ---
-class CryptoLSTM(nn.Module):
-    def __init__(self, input_dim, hidden_dim, num_layers, output_dim=1, dropout=0.2):
-        super(CryptoLSTM, self).__init__()
-        
-        self.hidden_dim = hidden_dim
+class LSTMModel(nn.Module):
+    def __init__(self, input_size, hidden_size=64, num_layers=2, dropout=0.2):
+        super(LSTMModel, self).__init__()
+        self.hidden_size = hidden_size
         self.num_layers = num_layers
-        
-        # שכבת LSTM
-        # batch_first=True אומר שהקלט מגיע בצורה (batch, seq, features)
-        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, 
-                            batch_first=True, dropout=dropout)
-        
-        # שכבת Linear סופית לחיזוי המחיר
-        self.fc = nn.Linear(hidden_dim, output_dim)
+
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=dropout)
+        self.dropout = nn.Dropout(dropout)
+        self.fc = nn.Linear(hidden_size, 1)
 
     def forward(self, x):
-        # אתחול המצבים הנסתרים (Hidden States) לאפס
-        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_dim).to(device)
-        c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_dim).to(device)
-        
-        # הרצת ה-LSTM
-        # out מכיל את הפלט של כל שלבי הזמן
+        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
+        c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
+
         out, _ = self.lstm(x, (h0, c0))
-        
-        # אנחנו לוקחים רק את הפלט של הצעד האחרון (החיזוי הסופי)
-        out = out[:, -1, :]
-        
-        # העברה בשכבה הלינארית
+        out = self.dropout(out[:, -1, :])
         out = self.fc(out)
         return out
 
-# --- 2. טעינת נתונים והכנת DataLoaders ---
+class EarlyStopping:
+    def __init__(self, patience=5, verbose=False, delta=0):
+        self.patience = patience
+        self.verbose = verbose
+        self.delta = delta
+        self.best_score = None
+        self.early_stop = False
+        self.counter = 0
+        self.best_loss = np.inf
+
+    def __call__(self, val_loss, model):
+        score = -val_loss
+
+        if self.best_score is None:
+            self.best_score = score
+            self.save_checkpoint(val_loss, model)
+        elif score < self.best_score + self.delta:
+            self.counter += 1
+            if self.verbose:
+                print(f'EarlyStopping counter: {self.counter} out of {self.patience}')
+            if self.counter >= self.patience:
+                self.early_stop = True
+        else:
+            self.best_score = score
+            self.save_checkpoint(val_loss, model)
+            self.counter = 0
+
+    def save_checkpoint(self, val_loss, model):
+        if self.verbose:
+            print(f'Validation loss decreased ({self.best_loss:.6f} --> {val_loss:.6f}).  Saving model ...')
+        torch.save(model.state_dict(), os.path.join(MODEL_DIR, 'best_lstm_model.pth'))
+        self.best_loss = val_loss
+
 def load_data():
     print("Loading data...")
     # טעינת קבצי ה-NumPy
@@ -67,118 +87,124 @@ def load_data():
     X_test = np.load(os.path.join(DATA_DIR, 'X_test.npy'))
     y_test = np.load(os.path.join(DATA_DIR, 'y_test.npy'))
 
-    # המרה ל-Tensors של PyTorch
-    train_data = TensorDataset(torch.Tensor(X_train), torch.Tensor(y_train))
-    val_data = TensorDataset(torch.Tensor(X_val), torch.Tensor(y_val))
-    test_data = TensorDataset(torch.Tensor(X_test), torch.Tensor(y_test))
+def train():
+    # בדיקת זמינות GPU
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
 
-    # יצירת DataLoaders (מנהלים את ה-Batches)
-    train_loader = DataLoader(train_data, shuffle=True, batch_size=BATCH_SIZE)
-    val_loader = DataLoader(val_data, batch_size=BATCH_SIZE)
-    test_loader = DataLoader(test_data, batch_size=BATCH_SIZE)
-    
-    return train_loader, val_loader, test_loader, X_train.shape[2]
+    # 1. טעינת הנתונים
+    X_train, y_train, X_val, y_val, X_test, y_test = load_data()
+    print(f"Data loaded! Train shape: {X_train.shape}")
 
-# --- 3. לולאת האימון (Training Loop) ---
-def train_model():
-    train_loader, val_loader, test_loader, input_dim = load_data()
-    
-    model = CryptoLSTM(input_dim=input_dim, hidden_dim=HIDDEN_DIM, 
-                       num_layers=NUM_LAYERS, dropout=DROPOUT).to(device)
-    
-    criterion = nn.MSELoss() # פונקציית הפסד
-    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE) # אופטימייזר
+    # המרת ל-Tensors
+    X_train = torch.tensor(X_train, dtype=torch.float32).to(device)
+    y_train = torch.tensor(y_train, dtype=torch.float32).to(device)
+    X_val = torch.tensor(X_val, dtype=torch.float32).to(device)
+    y_val = torch.tensor(y_val, dtype=torch.float32).to(device)
+    X_test = torch.tensor(X_test, dtype=torch.float32).to(device)
+    y_test = torch.tensor(y_test, dtype=torch.float32).to(device)
 
-    best_val_loss = float('inf')
-    train_losses = []
-    val_losses = []
-    
+    # יצירת DataLoaders
+    train_dataset = TensorDataset(X_train, y_train)
+    val_dataset = TensorDataset(X_val, y_val)
+    test_dataset = TensorDataset(X_test, y_test)
+
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
+
+    # 2. בניית המודל
+    input_size = X_train.shape[2]
+    model = LSTMModel(input_size=input_size).to(device)
+    print(model)
+
+    # 3. הגדרת Loss ו-Optimizer
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+
+    # 4. הכנת Early Stopping
     if not os.path.exists(MODEL_DIR):
         os.makedirs(MODEL_DIR)
 
-    print("Starting training...")
-    for epoch in range(EPOCHS):
-        # --- שלב האימון ---
-        model.train()
-        running_loss = 0.0
-        for X_batch, y_batch in train_loader:
-            X_batch, y_batch = X_batch.to(device), y_batch.to(device)
-            
-            optimizer.zero_grad()       # איפוס גרדיאנטים
-            outputs = model(X_batch)    # Forward pass
-            loss = criterion(outputs, y_batch.unsqueeze(1)) # חישוב שגיאה
-            loss.backward()             # Backward pass
-            optimizer.step()            # עדכון משקולות
-            
-            running_loss += loss.item()
-        
-        avg_train_loss = running_loss / len(train_loader)
-        train_losses.append(avg_train_loss)
+    early_stopping = EarlyStopping(patience=5, verbose=True)
 
-        # --- שלב הולידציה ---
+    # 5. ביצוע האימון (Training Loop)
+    print("Starting training...")
+    train_losses = []
+    val_losses = []
+
+    for epoch in range(EPOCHS):
+        model.train()
+        train_loss = 0.0
+        for X_batch, y_batch in train_loader:
+            optimizer.zero_grad()
+            outputs = model(X_batch)
+            loss = criterion(outputs.squeeze(), y_batch)
+            loss.backward()
+            optimizer.step()
+            train_loss += loss.item() * X_batch.size(0)
+
+        train_loss /= len(train_loader.dataset)
+        train_losses.append(train_loss)
+
+        # Validation
         model.eval()
         val_loss = 0.0
-        with torch.no_grad(): # אין צורך לחשב גרדיאנטים בולידציה
+        with torch.no_grad():
             for X_batch, y_batch in val_loader:
-                X_batch, y_batch = X_batch.to(device), y_batch.to(device)
                 outputs = model(X_batch)
-                loss = criterion(outputs, y_batch.unsqueeze(1))
-                val_loss += loss.item()
-        
-        avg_val_loss = val_loss / len(val_loader)
-        val_losses.append(avg_val_loss)
-        
-        print(f"Epoch {epoch+1}/{EPOCHS} | Train Loss: {avg_train_loss:.5f} | Val Loss: {avg_val_loss:.5f}")
+                loss = criterion(outputs.squeeze(), y_batch)
+                val_loss += loss.item() * X_batch.size(0)
 
-        # שמירת המודל הטוב ביותר (Checkpoint)
-        if avg_val_loss < best_val_loss:
-            best_val_loss = avg_val_loss
-            torch.save(model.state_dict(), os.path.join(MODEL_DIR, 'best_lstm_model.pth'))
-            # print("  Saved best model!")
+        val_loss /= len(val_loader.dataset)
+        val_losses.append(val_loss)
 
-    # --- 4. ויזואליזציה של תהליך הלמידה ---
+        print(f'Epoch {epoch+1}/{EPOCHS}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}')
+
+        # Early Stopping
+        early_stopping(val_loss, model)
+        if early_stopping.early_stop:
+            print("Early stopping")
+            break
+
+    # 6. הצגת גרף הלמידה (Loss)
     plt.figure(figsize=(10, 5))
     plt.plot(train_losses, label='Train Loss')
     plt.plot(val_losses, label='Validation Loss')
-    plt.title('Training Process')
+    plt.title('Training Process (Loss)')
     plt.xlabel('Epochs')
     plt.ylabel('Loss (MSE)')
     plt.legend()
     plt.show()
 
-    # --- 5. הערכה סופית על ה-Test Set ---
-    print("\nEvaluating on Test Set...")
-    # טעינת המשקולות הכי טובות
+    # 7. הערכה סופית על ה-Test Set
+    print("Evaluating on Test Set...")
     model.load_state_dict(torch.load(os.path.join(MODEL_DIR, 'best_lstm_model.pth')))
     model.eval()
-    
     predictions = []
     actuals = []
-    
     with torch.no_grad():
         for X_batch, y_batch in test_loader:
-            X_batch = X_batch.to(device)
             outputs = model(X_batch)
-            predictions.extend(outputs.cpu().numpy())
-            actuals.extend(y_batch.numpy())
-            
+            predictions.extend(outputs.squeeze().cpu().numpy())
+            actuals.extend(y_batch.cpu().numpy())
+
     predictions = np.array(predictions)
     actuals = np.array(actuals)
-    
+
     # חישוב מדדים
     rmse = np.sqrt(mean_squared_error(actuals, predictions))
     r2 = r2_score(actuals, predictions)
-    
     print(f"Final Test RMSE: {rmse:.4f}")
     print(f"Final Test R^2: {r2:.4f}")
-    
-    # גרף השוואה
+
+    # 8. ויזואליזציה של התחזית מול האמת
     plt.figure(figsize=(12, 6))
-    plt.plot(actuals[:100], label='Actual', color='blue')
-    plt.plot(predictions[:100], label='Predicted', color='red', linestyle='--')
-    plt.title('Prediction vs Actual (First 100 Test Samples)')
+    plt.plot(actuals[:100], label='Actual Price (Normalized)', color='blue')
+    plt.plot(predictions[:100], label='Predicted Price (Normalized)', color='red', linestyle='--')
+    plt.title('LSTM Prediction vs Actual (First 100 Test Samples)')
     plt.legend()
     plt.show()
 
 if __name__ == "__main__":
-    train_model()
+    train()
