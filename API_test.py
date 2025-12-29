@@ -12,7 +12,7 @@ COLUMNS = [
     'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
 ]
 
-# שימוש בנתיב דינמי (כמו שלמדנו) כדי למנוע שגיאות אצל חברי הצוות
+# נתיב דינמי (כדי שיעבוד לכל חברי הצוות)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SAVE_PATH = os.path.join(BASE_DIR, 'data')
 
@@ -51,7 +51,7 @@ class BinanceDataLoader:
         return None
 
     def fetch_history(self, start_str, end_str=None):
-        print(f"--- Starting data collection for {self.symbol} ---")
+        print(f"--- Starting data collection for {self.symbol} ({self.interval}) ---")
         
         start_ts = int(pd.Timestamp(start_str).timestamp() * 1000)
         end_ts = int(pd.Timestamp(end_str).timestamp() * 1000) if end_str else int(time.time() * 1000)
@@ -82,28 +82,27 @@ class BinanceDataLoader:
         df['open_time'] = pd.to_datetime(df['open_time'], unit='ms')
         df['close_time'] = pd.to_datetime(df['close_time'], unit='ms')
         
-        # --- שמירה בפורמט PICKLE ---
-        self._save_to_pickle(df)
+        # --- חזרה לשמירה בפורמט CSV ---
+        self._save_to_csv(df)
         
         print(f"--- Data Collection Complete. Fetched {len(df)} rows. ---")
         return df
 
-    def _save_to_pickle(self, df):
+    def _save_to_csv(self, df):
         """
-        שמירת הנתונים לקובץ Pickle (.pkl)
+        שמירת הנתונים לקובץ CSV
         """
-        filename = os.path.join(self.save_path, f"{self.symbol}_{self.interval}_data.pkl")
-        df.to_pickle(filename)
+        filename = os.path.join(self.save_path, f"{self.symbol}_{self.interval}_data.csv")
+        df.to_csv(filename, index=False)
         print(f"Data saved to {filename}")
 
 if __name__ == "__main__":
-    loader = BinanceDataLoader(symbol='BTCUSDT', interval='1h')
-    # משיכה מ-2020 (או כל תאריך שתבחר)
-    df = loader.fetch_history(start_str='2020-01-01')
+    loader = BinanceDataLoader(symbol='BTCUSDT', interval='5m')
     
-    # בדיקה מהירה שהקובץ נוצר
-    expected_file = os.path.join(SAVE_PATH, "BTCUSDT_1h_data.pkl")
+    df = loader.fetch_history(start_str='2017-09-09', end_str=None)
+    
+    expected_file = os.path.join(SAVE_PATH, f"BTCUSDT_{loader.interval}_data.csv")
     if os.path.exists(expected_file):
-        print(f"Success! Pickle file found at: {expected_file}")
+        print(f"Success! CSV file found at: {expected_file}")
     else:
         print("Error: File was not created.")
