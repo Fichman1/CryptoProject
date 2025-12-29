@@ -1,10 +1,10 @@
 import numpy as np
 import os
 import matplotlib.pyplot as plt
-import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Dropout, Input
-from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, TensorDataset
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import joblib
 
@@ -18,6 +18,58 @@ BATCH_SIZE = 64      # כמה דוגמאות המודל רואה במכה אחת
 EPOCHS = 50          # מספר מקסימלי של פעמים שהמודל עובר על כל הדאטה
 LEARNING_RATE = 0.001 # קצב הלמידה [cite: 127]
 
+class LSTMModel(nn.Module):
+    def __init__(self, input_size, hidden_size=64, num_layers=2, dropout=0.2):
+        super(LSTMModel, self).__init__()
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=dropout)
+        self.dropout = nn.Dropout(dropout)
+        self.fc = nn.Linear(hidden_size, 1)
+
+    def forward(self, x):
+        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
+        c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
+
+        out, _ = self.lstm(x, (h0, c0))
+        out = self.dropout(out[:, -1, :])
+        out = self.fc(out)
+        return out
+
+class EarlyStopping:
+    def __init__(self, patience=5, verbose=False, delta=0):
+        self.patience = patience
+        self.verbose = verbose
+        self.delta = delta
+        self.best_score = None
+        self.early_stop = False
+        self.counter = 0
+        self.best_loss = np.inf
+
+    def __call__(self, val_loss, model):
+        score = -val_loss
+
+        if self.best_score is None:
+            self.best_score = score
+            self.save_checkpoint(val_loss, model)
+        elif score < self.best_score + self.delta:
+            self.counter += 1
+            if self.verbose:
+                print(f'EarlyStopping counter: {self.counter} out of {self.patience}')
+            if self.counter >= self.patience:
+                self.early_stop = True
+        else:
+            self.best_score = score
+            self.save_checkpoint(val_loss, model)
+            self.counter = 0
+
+    def save_checkpoint(self, val_loss, model):
+        if self.verbose:
+            print(f'Validation loss decreased ({self.best_loss:.6f} --> {val_loss:.6f}).  Saving model ...')
+        torch.save(model.state_dict(), os.path.join(MODEL_DIR, 'best_lstm_model.pth'))
+        self.best_loss = val_loss
+
 def load_data():
     """טעינת הנתונים המעובדים (קבצי .npy)"""
     print("Loading data from:", DATA_DIR)
@@ -29,98 +81,120 @@ def load_data():
     y_test = np.load(os.path.join(DATA_DIR, 'y_test.npy'))
     return X_train, y_train, X_val, y_val, X_test, y_test
 
-def build_model(input_shape):
-    """בניית ארכיטקטורת LSTM"""
-    model = Sequential()
-    
-    # שכבת כניסה
-    model.add(Input(shape=input_shape))
-    
-    # שכבת LSTM ראשונה (מחזירה רצף לשכבה הבאה)
-    model.add(LSTM(units=64, return_sequences=True)) 
-    model.add(Dropout(0.2)) # מניעת Overfitting
-
-    # שכבת LSTM שנייה (לא מחזירה רצף, אלא וקטור סופי)
-    model.add(LSTM(units=64, return_sequences=False))
-    model.add(Dropout(0.2))
-
-    # שכבת יציאה (ניבוי ערך אחד: מחיר הסגירה)
-    model.add(Dense(units=1))
-
-    # קומפילציה [cite: 90]
-    model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE), 
-                  loss='mean_squared_error')
-    
-    return model
-
 def train():
+    # בדיקת זמינות GPU
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+
     # 1. טעינת הנתונים
     X_train, y_train, X_val, y_val, X_test, y_test = load_data()
     print(f"Data loaded! Train shape: {X_train.shape}")
 
-    # 2. בניית המודל
-    model = build_model((X_train.shape[1], X_train.shape[2]))
-    model.summary()
+    # המרת ל-Tensors
+    X_train = torch.tensor(X_train, dtype=torch.float32).to(device)
+    y_train = torch.tensor(y_train, dtype=torch.float32).to(device)
+    X_val = torch.tensor(X_val, dtype=torch.float32).to(device)
+    y_val = torch.tensor(y_val, dtype=torch.float32).to(device)
+    X_test = torch.tensor(X_test, dtype=torch.float32).to(device)
+    y_test = torch.tensor(y_test, dtype=torch.float32).to(device)
 
-    # 3. הכנת Callbacks (שמירה ועצירה)
+    # יצירת DataLoaders
+    train_dataset = TensorDataset(X_train, y_train)
+    val_dataset = TensorDataset(X_val, y_val)
+    test_dataset = TensorDataset(X_test, y_test)
+
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
+
+    # 2. בניית המודל
+    input_size = X_train.shape[2]
+    model = LSTMModel(input_size=input_size).to(device)
+    print(model)
+
+    # 3. הגדרת Loss ו-Optimizer
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+
+    # 4. הכנת Early Stopping
     if not os.path.exists(MODEL_DIR):
         os.makedirs(MODEL_DIR)
 
-    # שמירת המודל הטוב ביותר (Checkpoints) [cite: 130]
-    checkpoint_path = os.path.join(MODEL_DIR, 'best_lstm_model.keras')
-    checkpoint = ModelCheckpoint(
-        checkpoint_path, monitor='val_loss', save_best_only=True, verbose=1
-    )
-    
-    # עצירה מוקדמת אם אין שיפור (Early Stopping)
-    early_stopping = EarlyStopping(
-        monitor='val_loss', patience=5, restore_best_weights=True
-    )
+    early_stopping = EarlyStopping(patience=5, verbose=True)
 
-    # 4. ביצוע האימון (Training Loop) [cite: 59]
+    # 5. ביצוע האימון (Training Loop)
     print("Starting training...")
-    history = model.fit(
-        X_train, y_train,
-        epochs=EPOCHS,
-        batch_size=BATCH_SIZE,
-        validation_data=(X_val, y_val),
-        callbacks=[checkpoint, early_stopping],
-        verbose=1
-    )
+    train_losses = []
+    val_losses = []
 
-    # 5. הצגת גרף הלמידה (Loss)
+    for epoch in range(EPOCHS):
+        model.train()
+        train_loss = 0.0
+        for X_batch, y_batch in train_loader:
+            optimizer.zero_grad()
+            outputs = model(X_batch)
+            loss = criterion(outputs.squeeze(), y_batch)
+            loss.backward()
+            optimizer.step()
+            train_loss += loss.item() * X_batch.size(0)
+
+        train_loss /= len(train_loader.dataset)
+        train_losses.append(train_loss)
+
+        # Validation
+        model.eval()
+        val_loss = 0.0
+        with torch.no_grad():
+            for X_batch, y_batch in val_loader:
+                outputs = model(X_batch)
+                loss = criterion(outputs.squeeze(), y_batch)
+                val_loss += loss.item() * X_batch.size(0)
+
+        val_loss /= len(val_loader.dataset)
+        val_losses.append(val_loss)
+
+        print(f'Epoch {epoch+1}/{EPOCHS}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}')
+
+        # Early Stopping
+        early_stopping(val_loss, model)
+        if early_stopping.early_stop:
+            print("Early stopping")
+            break
+
+    # 6. הצגת גרף הלמידה (Loss)
     plt.figure(figsize=(10, 5))
-    plt.plot(history.history['loss'], label='Train Loss')
-    plt.plot(history.history['val_loss'], label='Validation Loss')
+    plt.plot(train_losses, label='Train Loss')
+    plt.plot(val_losses, label='Validation Loss')
     plt.title('Training Process (Loss)')
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
     plt.legend()
     plt.show()
 
-    # 6. הערכה סופית על ה-Test Set [cite: 92]
+    # 7. הערכה סופית על ה-Test Set
     print("Evaluating on Test Set...")
-    predictions = model.predict(X_test)
-    
-    # המרת התחזיות חזרה למחיר דולרי אמיתי (Inverse Transform)
-    # נטען את הסקיילר ששמרנו בשלב הקודם
-    scaler_path = os.path.join(MODEL_DIR, 'scaler.pkl')
-    if os.path.exists(scaler_path):
-        scaler = joblib.load(scaler_path)
-        # טריק: הסקיילר מצפה ל-5 עמודות, אנחנו צריכים "לזייף" אותן כדי להמיר רק את ה-Close
-        # (בפרויקט מורכב יותר בונים סקיילר נפרד ל-Target, כאן נעשה קירוב לצורך התצוגה)
-        # נציג כרגע את הגרף בערכים מנורמלים (0-1) כדי לוודא שהמודל עובד
-        pass 
+    model.load_state_dict(torch.load(os.path.join(MODEL_DIR, 'best_lstm_model.pth')))
+    model.eval()
+    predictions = []
+    actuals = []
+    with torch.no_grad():
+        for X_batch, y_batch in test_loader:
+            outputs = model(X_batch)
+            predictions.extend(outputs.squeeze().cpu().numpy())
+            actuals.extend(y_batch.cpu().numpy())
 
-    # חישוב מדדים [cite: 134]
-    rmse = np.sqrt(mean_squared_error(y_test, predictions))
-    r2 = r2_score(y_test, predictions)
+    predictions = np.array(predictions)
+    actuals = np.array(actuals)
+
+    # חישוב מדדים
+    rmse = np.sqrt(mean_squared_error(actuals, predictions))
+    r2 = r2_score(actuals, predictions)
     print(f"Final Test RMSE: {rmse:.4f}")
     print(f"Final Test R^2: {r2:.4f}")
 
-    # 7. ויזואליזציה של התחזית מול האמת [cite: 141]
+    # 8. ויזואליזציה של התחזית מול האמת
     plt.figure(figsize=(12, 6))
-    plt.plot(y_test[:100], label='Actual Price (Normalized)', color='blue') # מציג רק 100 ראשונים כדי שיהיה ברור
+    plt.plot(actuals[:100], label='Actual Price (Normalized)', color='blue')
     plt.plot(predictions[:100], label='Predicted Price (Normalized)', color='red', linestyle='--')
     plt.title('LSTM Prediction vs Actual (First 100 Test Samples)')
     plt.legend()
