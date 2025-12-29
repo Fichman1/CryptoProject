@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import os
+import ta # ספריית הניתוח הטכני
 
 # --- הגדרות ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -8,28 +9,27 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # קובץ הנתונים (5 דקות)
 DATA_PATH = os.path.join(BASE_DIR, 'data', 'BTCUSDT_5m_data.csv') 
 
-# --- השינוי הגדול: חלון זמן של יממה שלמה ---
-# 288 נרות של 5 דקות = 24 שעות אחורה
+# חלון זמן של יממה שלמה (24 שעות * 12 נרות בשעה)
 SEQ_LENGTH = 288  
 
-PREDICT_AHEAD = 1 # חיזוי של נר אחד קדימה (5 דקות קדימה)
+PREDICT_AHEAD = 1 
 TRAIN_SPLIT = 0.8
 VAL_SPLIT = 0.1
 
-# עמודות לאימון
-FEATURE_COLS = ['log_ret', 'volume']
+# --- רשימת הפיצ'רים המעודכנת ---
+# המודל יקבל עכשיו 5 נתונים בכל צעד זמן במקום 2
+FEATURE_COLS = ['log_ret', 'volume', 'rsi', 'macd', 'bb_width']
 TARGET_COL = 'log_ret'
 
 class DataPreprocessor:
     def __init__(self):
-        # ללא סקיילר (משתמשים ב-Log Returns גולמי)
         pass
 
     def load_and_clean_data(self, filepath):
         print(f"Loading data from {filepath}...")
         
         if not os.path.exists(filepath):
-            raise FileNotFoundError(f"File not found: {filepath}. Please run API_test.py first.")
+            raise FileNotFoundError(f"File not found: {filepath}")
 
         df = pd.read_csv(filepath)
         
@@ -38,15 +38,34 @@ class DataPreprocessor:
         df = df.drop_duplicates(subset=['open_time'])
         df = df.ffill().dropna()
 
-        # חישוב תשואה לוגריתמית
+        # --- 1. חישוב Log Returns (הלב של המודל) ---
         df['log_ret'] = np.log(df['close'] / df['close'].shift(1))
         
-        # טיפול ב-Volume (הקטנה סדרי גודל)
+        # --- 2. חישוב אינדיקטורים טכניים (Technical Indicators) ---
+        
+        # A. RSI (Relative Strength Index) - מומנטום
+        # טווח מקורי: 0-100. נחלק ב-100 כדי שיהיה בין 0-1
+        df['rsi'] = ta.momentum.rsi(df['close'], window=14) / 100.0
+        
+        # B. MACD (Moving Average Convergence Divergence) - זיהוי מגמה
+        # נשתמש בהפרש (MACD Diff) שמראה את עוצמת המגמה
+        macd = ta.trend.MACD(df['close'])
+        df['macd'] = macd.macd_diff() # ערכים אלו כבר קטנים יחסית ולכן מתאימים
+        
+        # C. Bollinger Bands - תנודתיות
+        # נשתמש ברוחב הרצועה (Band Width) כדי לדעת אם השוק "רגוע" או "סוער"
+        bb = ta.volatility.BollingerBands(df['close'], window=20, window_dev=2)
+        df['bb_width'] = bb.bollinger_wband()
+
+        # --- 3. טיפול ב-Volume ---
+        # שימוש בלוג כדי להקטין את המספרים הענקיים
         df['volume'] = np.log(df['volume'] + 1) 
         
+        # האינדיקטורים יוצרים ערכי NaN בהתחלה (כי צריך היסטוריה כדי לחשב אותם)
+        # למשל RSI צריך 14 נרות אחורה. אז נמחק את השורות הריקות.
         df = df.dropna()
         
-        print(f"Data converted to Log Returns. Rows: {len(df)}")
+        print(f"Features added: RSI, MACD, BB_Width. Total Rows: {len(df)}")
         return df
 
     def create_sequences(self, data, target, seq_length):
@@ -84,8 +103,8 @@ class DataPreprocessor:
         test_data = data[val_end:]
         test_target = target[val_end:]
 
-        # 3. יצירת רצפים (Sequences)
-        print(f"Creating sliding windows (SEQ_LENGTH={SEQ_LENGTH} steps = 24h context)...")
+        # 3. יצירת רצפים
+        print(f"Creating sliding windows (SEQ_LENGTH={SEQ_LENGTH}, Features={len(FEATURE_COLS)})...")
         X_train, y_train = self.create_sequences(train_data, train_target, SEQ_LENGTH)
         X_val, y_val = self.create_sequences(val_data, val_target, SEQ_LENGTH)
         X_test, y_test = self.create_sequences(test_data, test_target, SEQ_LENGTH)
@@ -102,8 +121,8 @@ class DataPreprocessor:
         np.save(os.path.join(save_dir, 'X_test.npy'), X_test)
         np.save(os.path.join(save_dir, 'y_test.npy'), y_test)
 
-        print("--- Preprocessing Complete ---")
-        print(f"X_train shape: {X_train.shape}") # אמור להיות (Samples, 288, 2)
+        print("--- Preprocessing Complete (With Indicators) ---")
+        print(f"X_train shape: {X_train.shape}") # אמור להיות (Samples, 288, 5)
         print(f"X_test shape: {X_test.shape}")
 
 if __name__ == "__main__":
