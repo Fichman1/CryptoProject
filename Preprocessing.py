@@ -1,75 +1,55 @@
 import pandas as pd
 import numpy as np
-from sklearn.preprocessing import MinMaxScaler
-import joblib
 import os
 
 # --- הגדרות ---
-# שימוש בנתיב דינמי כדי למנוע שגיאות אצל חברי הצוות
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_PATH = os.path.join(BASE_DIR, 'data', 'BTCUSDT_1h_data.csv')
 
-SEQ_LENGTH = 60   # אורך החלון (כמה נרות אחורה המודל רואה)
-PREDICT_AHEAD = 1 # חיזוי של צעד אחד קדימה
-TRAIN_SPLIT = 0.8 # 80% לאימון
-VAL_SPLIT = 0.1   # 10% לולידציה
+# קובץ הנתונים (5 דקות)
+DATA_PATH = os.path.join(BASE_DIR, 'data', 'BTCUSDT_5m_data.csv') 
 
-# כעת אנחנו מתמקדים בחיזוי התשואה הלוגריתמית
-# אנחנו נשתמש בתשואה ובנפח המסחר כפיצ'רים
-FEATURE_COLS = ['log_ret', 'volume'] 
-TARGET_COL = 'log_ret' 
+# --- השינוי הגדול: חלון זמן של יממה שלמה ---
+# 288 נרות של 5 דקות = 24 שעות אחורה
+SEQ_LENGTH = 288  
+
+PREDICT_AHEAD = 1 # חיזוי של נר אחד קדימה (5 דקות קדימה)
+TRAIN_SPLIT = 0.8
+VAL_SPLIT = 0.1
+
+# עמודות לאימון
+FEATURE_COLS = ['log_ret', 'volume']
+TARGET_COL = 'log_ret'
 
 class DataPreprocessor:
     def __init__(self):
-        # סקיילר לנרמול הנתונים לטווח 0-1 (חשוב ל-LSTM)
-        self.scaler = MinMaxScaler(feature_range=(0, 1))
+        # ללא סקיילר (משתמשים ב-Log Returns גולמי)
+        pass
 
     def load_and_clean_data(self, filepath):
         print(f"Loading data from {filepath}...")
-        df = pd.read_csv(filepath)
-        initial_len = len(df)
         
-        # המרת תאריך לפורמט זמן
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"File not found: {filepath}. Please run API_test.py first.")
+
+        df = pd.read_csv(filepath)
+        
         df['open_time'] = pd.to_datetime(df['open_time'])
         df = df.sort_values('open_time')
-        
-        # הסרת כפילויות
         df = df.drop_duplicates(subset=['open_time'])
-        
-        # [cite: 41] טיפול בערכים חסרים (Fill-Forward)
         df = df.ffill().dropna()
+
+        # חישוב תשואה לוגריתמית
+        df['log_ret'] = np.log(df['close'] / df['close'].shift(1))
         
-        print(f"Cleaned data: {len(df)} rows (removed {initial_len - len(df)} duplicates/NaNs)")
+        # טיפול ב-Volume (הקטנה סדרי גודל)
+        df['volume'] = np.log(df['volume'] + 1) 
+        
+        df = df.dropna()
+        
+        print(f"Data converted to Log Returns. Rows: {len(df)}")
         return df
 
-    def compute_log_returns(self, data):
-        """
-        מחשב log returns עבור הנתונים הפיננסיים
-        """
-        # העתקה של הדאטה
-        returns_data = data.copy()
-
-        # חישוב log returns עבור מחירים (open, high, low, close)
-        price_cols = ['open', 'high', 'low', 'close']
-        for col in price_cols:
-            col_idx = FEATURE_COLS.index(col)
-            # log(P_t / P_{t-1}) = log(P_t) - log(P_{t-1})
-            returns_data[1:, col_idx] = np.log(data[1:, col_idx] / data[:-1, col_idx])
-
-        # חישוב log עבור volume (מוסיף 1 כדי למנוע log(0))
-        volume_idx = FEATURE_COLS.index('volume')
-        returns_data[:, volume_idx] = np.log(data[:, volume_idx] + 1)
-
-        # הסרת השורה הראשונה (NaN מה-log returns)
-        returns_data = returns_data[1:]
-
-        return returns_data
-
     def create_sequences(self, data, target, seq_length):
-        """
-        יצירת Sliding Windows
-        ממיר את הדאטה למבנה תלת-ממדי: (Samples, Time Steps, Features)
-        """
         xs, ys = [], []
         for i in range(len(data) - seq_length - PREDICT_AHEAD + 1):
             x = data[i:(i + seq_length)]
@@ -79,48 +59,38 @@ class DataPreprocessor:
         return np.array(xs), np.array(ys)
 
     def process(self):
-        # 1. טעינה וחישוב Log Returns
-        df = self.load_and_clean_data(DATA_PATH)
-        
-        # שמירת רק העמודות הרלוונטיות
-        data = df[FEATURE_COLS].values
-        target = df[[TARGET_COL]].values # משתמשים בסוגריים כפולים כדי לשמור על מימד
+        # 1. טעינה ועיבוד
+        try:
+            df = self.load_and_clean_data(DATA_PATH)
+        except FileNotFoundError as e:
+            print(e)
+            return
 
-        # 2. חלוקה ל-Train/Val/Test לפני הנרמול (כדי למנוע Data Leakage)
+        # המרה ל-Numpy
+        data = df[FEATURE_COLS].values
+        target = df[TARGET_COL].values
+
+        # 2. חלוקה ל-Train/Val/Test
         n = len(data)
         train_end = int(n * TRAIN_SPLIT)
         val_end = int(n * (TRAIN_SPLIT + VAL_SPLIT))
 
         train_data = data[:train_end]
+        train_target = target[:train_end]
+        
         val_data = data[train_end:val_end]
+        val_target = target[train_end:val_end]
+        
         test_data = data[val_end:]
-        
-        # 3.  נרמול הנתונים (לומדים את הסקאלה רק מה-Train!)
-        print("Normalizing data...")
-        self.scaler.fit(train_data) # לומד מינימום ומקסימום רק מהאימון
-        
-        # שמירת הסקיילר לשימוש עתידי (בשלב החיזוי בזמן אמת)
-        if not os.path.exists('models'):
-            os.makedirs('models')
-        joblib.dump(self.scaler, os.path.join(BASE_DIR, 'models', 'scaler.pkl'))
-        
-        # ביצוע הטרנספורמציה
-        train_scaled = self.scaler.transform(train_data)
-        val_scaled = self.scaler.transform(val_data)
-        test_scaled = self.scaler.transform(test_data)
+        test_target = target[val_end:]
 
-        # נרמול ה-Target בנפרד (כדי שנוכל להפוך את הנרמול בסוף ולדעת מחיר אמיתי)
-        # הערה: כרגע אנחנו משתמשים באותו סקיילר לכל הפיצ'רים. 
-        # לצורך הפשטות נשתמש בעמודת ה-Close מתוך המידע המנורמל כ-Target.
-        target_col_idx = FEATURE_COLS.index(TARGET_COL)
-        
-        # 4. יצירת רצפים (Windows)
-        print("Creating sliding windows...")
-        X_train, y_train = self.create_sequences(train_scaled, train_scaled[:, target_col_idx], SEQ_LENGTH)
-        X_val, y_val = self.create_sequences(val_scaled, val_scaled[:, target_col_idx], SEQ_LENGTH)
-        X_test, y_test = self.create_sequences(test_scaled, test_scaled[:, target_col_idx], SEQ_LENGTH)
+        # 3. יצירת רצפים (Sequences)
+        print(f"Creating sliding windows (SEQ_LENGTH={SEQ_LENGTH} steps = 24h context)...")
+        X_train, y_train = self.create_sequences(train_data, train_target, SEQ_LENGTH)
+        X_val, y_val = self.create_sequences(val_data, val_target, SEQ_LENGTH)
+        X_test, y_test = self.create_sequences(test_data, test_target, SEQ_LENGTH)
 
-        # 5. שמירת קבצי NumPy
+        # 4. שמירה
         save_dir = os.path.join(BASE_DIR, 'processed_data')
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
@@ -133,10 +103,9 @@ class DataPreprocessor:
         np.save(os.path.join(save_dir, 'y_test.npy'), y_test)
 
         print("--- Preprocessing Complete ---")
-        print(f"X_train shape: {X_train.shape}")
+        print(f"X_train shape: {X_train.shape}") # אמור להיות (Samples, 288, 2)
         print(f"X_test shape: {X_test.shape}")
 
 if __name__ == "__main__":
     processor = DataPreprocessor()
     processor.process()
-   
