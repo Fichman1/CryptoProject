@@ -1,2 +1,18 @@
+# Ignore data files
+data/
 processed_data/
 models/
+
+# Ignore python cache
+__pycache__/
+*.pyc
+
+# Ignore virtual environment
+.venv/
+venv/
+
+# Ignore large specific files
+*.csv
+*.pkl
+*.npy
+*.keras
