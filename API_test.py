@@ -89,9 +89,6 @@ class BinanceDataLoader:
         return df
 
     def _save_to_csv(self, df):
-        """
-        שמירת הנתונים לקובץ CSV
-        """
         filename = os.path.join(self.save_path, f"{self.symbol}_{self.interval}_data.csv")
         df.to_csv(filename, index=False)
         print(f"Data saved to {filename}")
