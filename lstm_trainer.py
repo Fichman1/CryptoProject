@@ -1,3 +1,7 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import TensorDataset, DataLoader
 import numpy as np
 import os
 import matplotlib.pyplot as plt
@@ -8,15 +12,18 @@ from torch.utils.data import DataLoader, TensorDataset
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import joblib
 
-# --- הגדרות נתיבים (דינמי - יעבוד לכולם) ---
+# --- הגדרות ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'processed_data')
 MODEL_DIR = os.path.join(BASE_DIR, 'models')
 
-# --- פרמטרים לאימון (Hyperparameters) ---
-BATCH_SIZE = 64      # כמה דוגמאות המודל רואה במכה אחת [cite: 126]
-EPOCHS = 50          # מספר מקסימלי של פעמים שהמודל עובר על כל הדאטה
-LEARNING_RATE = 0.001 # קצב הלמידה [cite: 127]
+# היפר-פרמטרים (ניתן לשינוי לפי דרישות SRS)
+BATCH_SIZE = 64
+EPOCHS = 50
+LEARNING_RATE = 0.001
+HIDDEN_DIM = 64
+NUM_LAYERS = 2
+DROPOUT = 0.2
 
 class LSTMModel(nn.Module):
     def __init__(self, input_size, hidden_size=64, num_layers=2, dropout=0.2):
@@ -71,15 +78,14 @@ class EarlyStopping:
         self.best_loss = val_loss
 
 def load_data():
-    """טעינת הנתונים המעובדים (קבצי .npy)"""
-    print("Loading data from:", DATA_DIR)
+    print("Loading data...")
+    # טעינת קבצי ה-NumPy
     X_train = np.load(os.path.join(DATA_DIR, 'X_train.npy'))
     y_train = np.load(os.path.join(DATA_DIR, 'y_train.npy'))
     X_val = np.load(os.path.join(DATA_DIR, 'X_val.npy'))
     y_val = np.load(os.path.join(DATA_DIR, 'y_val.npy'))
     X_test = np.load(os.path.join(DATA_DIR, 'X_test.npy'))
     y_test = np.load(os.path.join(DATA_DIR, 'y_test.npy'))
-    return X_train, y_train, X_val, y_val, X_test, y_test
 
 def train():
     # בדיקת זמינות GPU
@@ -167,7 +173,7 @@ def train():
     plt.plot(val_losses, label='Validation Loss')
     plt.title('Training Process (Loss)')
     plt.xlabel('Epochs')
-    plt.ylabel('Loss')
+    plt.ylabel('Loss (MSE)')
     plt.legend()
     plt.show()
 
