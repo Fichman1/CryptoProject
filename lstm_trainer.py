@@ -23,7 +23,7 @@ EPOCHS = 50
 LEARNING_RATE = 0.001
 HIDDEN_DIM = 64
 NUM_LAYERS = 2
-DROPOUT = 0.2
+DROPOUT = 0.5
 
 class LSTMModel(nn.Module):
     def __init__(self, input_size, hidden_size=64, num_layers=2, dropout=0.2):
@@ -86,6 +86,7 @@ def load_data():
     y_val = np.load(os.path.join(DATA_DIR, 'y_val.npy'))
     X_test = np.load(os.path.join(DATA_DIR, 'X_test.npy'))
     y_test = np.load(os.path.join(DATA_DIR, 'y_test.npy'))
+    return X_train, y_train, X_val, y_val, X_test, y_test
 
 def train():
     # בדיקת זמינות GPU
@@ -198,12 +199,25 @@ def train():
     print(f"Final Test RMSE: {rmse:.4f}")
     print(f"Final Test R^2: {r2:.4f}")
 
-    # 8. ויזואליזציה של התחזית מול האמת
+    # 8. Enhanced Visualization
     plt.figure(figsize=(12, 6))
-    plt.plot(actuals[:100], label='Actual Price (Normalized)', color='blue')
-    plt.plot(predictions[:100], label='Predicted Price (Normalized)', color='red', linestyle='--')
-    plt.title('LSTM Prediction vs Actual (First 100 Test Samples)')
-    plt.legend()
+
+    # If you have your scaler, use:
+    # actuals_rescaled = scaler.inverse_transform(actuals.reshape(-1, 1))
+    # predictions_rescaled = scaler.inverse_transform(predictions.reshape(-1, 1))
+
+    plt.plot(actuals[:100], label='Actual', color='#1f77b4', linewidth=2)
+    plt.plot(predictions[:100], label='Predicted', color='#ff7f0e', linestyle='--', linewidth=2)
+
+    # Add a fill between to show the error/gap
+    plt.fill_between(range(100), actuals[:100], predictions[:100], color='gray', alpha=0.2)
+
+    plt.title(f'LSTM Test Performance (RMSE: {rmse:.4f})', fontsize=14)
+    plt.xlabel('Time Steps (Test Set)', fontsize=12)
+    plt.ylabel('Price (Normalized)', fontsize=12)
+    plt.grid(True, which='both', linestyle='--', alpha=0.5)
+    plt.legend(loc='upper left')
+    plt.tight_layout()
     plt.show()
 
 if __name__ == "__main__":
