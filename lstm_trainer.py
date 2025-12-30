@@ -6,6 +6,8 @@ import numpy as np
 import os
 import matplotlib.pyplot as plt
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+import mplfinance as mpf
+import pandas as pd
 # import joblib # לא בשימוש כרגע כי אנחנו עובדים עם לוג ללא סקיילר
 
 # --- הגדרות ---
@@ -29,10 +31,10 @@ class LSTMModel(nn.Module):
 
         # batch_first=True: הקלט מגיע בצורה (batch, seq, features)
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=dropout)
-        
+
         # שכבת Dropout נוספת אחרי ה-LSTM ולפני השכבה הלינארית
         self.dropout = nn.Dropout(dropout)
-        
+
         # שכבת יציאה לחיזוי ערך יחיד
         self.fc = nn.Linear(hidden_size, 1)
 
@@ -44,7 +46,7 @@ class LSTMModel(nn.Module):
         # הרצת ה-LSTM
         # out מכיל את הפלט של כל שלבי הזמן
         out, _ = self.lstm(x, (h0, c0))
-        
+
         # לוקחים רק את הפלט של הצעד האחרון (Many-to-One)
         out = self.dropout(out[:, -1, :])
         out = self.fc(out)
@@ -190,10 +192,10 @@ def train():
     # טעינת המודל הטוב ביותר שנשמר
     model.load_state_dict(torch.load(os.path.join(MODEL_DIR, 'best_lstm_model.pth')))
     model.eval()
-    
+
     predictions = []
     actuals = []
-    
+
     with torch.no_grad():
         for X_batch, y_batch in test_loader:
             outputs = model(X_batch)
@@ -206,19 +208,75 @@ def train():
     # חישוב מדדים
     rmse = np.sqrt(mean_squared_error(actuals, predictions))
     r2 = r2_score(actuals, predictions) # הערה: ב-Log Returns ה-R2 יהיה נמוך מאוד, וזה תקין!
-    
+
     print(f"Final Test RMSE: {rmse:.5f}")
     print(f"Final Test R^2: {r2:.5f}")
 
-    # 8. ויזואליזציה (זום על 100 דוגמאות ראשונות)
-    plt.figure(figsize=(12, 6))
-    plt.plot(actuals[:150], label='Actual Log Return', color='blue')
-    plt.plot(predictions[:150], label='Predicted Log Return', color='red', linestyle='--')
-    plt.title(f'LSTM Prediction vs Actual (Log Returns)\nRMSE: {rmse:.5f}')
-    plt.xlabel('Time Steps')
-    plt.ylabel('Log Return Value')
-    plt.legend()
-    plt.show()
+    # 8. Visualization (OHLCV Candles with Predicted Price Overlay)
+    print("\nGenerating Candle Visualization...")
+
+    # --- A. Load Original Data for OHLC context ---
+    csv_path = os.path.join(BASE_DIR, 'data', 'BTCUSDT_5m_data.csv')
+    df_full = pd.read_csv(csv_path)
+    df_full['open_time'] = pd.to_datetime(df_full['open_time'])
+    df_full.set_index('open_time', inplace=True)
+
+    # --- B. Reconstruct Indices to match Preprocessing.py ---
+    # We must replicate the split logic to find exactly which candles are in the Test Set
+    # Note: Ensure these match the constants in Preprocessing.py
+    SEQ_LENGTH = 288
+    TRAIN_SPLIT = 0.8
+    VAL_SPLIT = 0.1
+
+    n = len(df_full)
+    train_end = int(n * TRAIN_SPLIT)
+    val_end = int(n * (TRAIN_SPLIT + VAL_SPLIT))
+
+    # The test set in Preprocessing starts at val_end
+    # But the first TARGET (y) appears after SEQ_LENGTH steps
+    test_start_index = val_end + SEQ_LENGTH
+
+    # Slice the original dataframe to match the size of 'predictions'
+    # We limit it to the number of predictions we actually have
+    df_test_candles = df_full.iloc[test_start_index : test_start_index + len(predictions)].copy()
+
+    # --- C. Reconstruct Real Predicted Prices ---
+    # Model predicted Log Returns: ln(P_t / P_{t-1})
+    # To get Price: P_t = P_{t-1} * exp(prediction)
+    # We use the 'close' from the PREVIOUS step (shift(1)) as the base
+
+    previous_closes = df_full.iloc[test_start_index-1 : test_start_index + len(predictions)-1]['close'].values
+
+    # Calculate Predicted Price
+    predicted_prices = previous_closes * np.exp(predictions)
+
+    # Add to DataFrame for plotting
+    df_test_candles['Predicted_Close'] = predicted_prices
+
+    # --- D. Plotting with mplfinance ---
+    # We zoom in on the first 150 candles for clarity
+    ZOOM_SAMPLES = 150
+    df_plot = df_test_candles.head(ZOOM_SAMPLES)
+
+    # Create the overlay plot (The predicted price line)
+    # panel=0 means it draws on the main chart
+    apdict = mpf.make_addplot(df_plot['Predicted_Close'], type='line', color='red', linestyle='--', width=1.5, panel=0)
+
+    # Plot Settings
+    title_text = f'BTC/USDT Prediction vs Actual\nRMSE (Log Ret): {rmse:.5f}'
+
+    mpf.plot(
+        df_plot,
+        type='candle',        # Show candles
+        style='yahoo',        # Green/Red style
+        addplot=apdict,       # Add the prediction line
+        volume=True,          # Show volume at the bottom
+        title=title_text,
+        ylabel='Price (USDT)',
+        figsize=(14, 8),
+        tight_layout=True
+    )
+    print("Visualization displayed.")
 
 if __name__ == "__main__":
     train()

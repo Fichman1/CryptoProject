@@ -21,7 +21,7 @@ class BinanceDataLoader:
         self.symbol = symbol
         self.interval = interval
         self.save_path = save_path
-        
+
         # יצירת תיקייה אם לא קיימת
         if not os.path.exists(save_path):
             os.makedirs(save_path)
@@ -33,7 +33,7 @@ class BinanceDataLoader:
             'startTime': start_time,
             'limit': limit
         }
-        
+
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -52,21 +52,21 @@ class BinanceDataLoader:
 
     def fetch_history(self, start_str, end_str=None):
         print(f"--- Starting data collection for {self.symbol} ({self.interval}) ---")
-        
+
         start_ts = int(pd.Timestamp(start_str).timestamp() * 1000)
         end_ts = int(pd.Timestamp(end_str).timestamp() * 1000) if end_str else int(time.time() * 1000)
-        
+
         all_data = []
         current_start = start_ts
-        
+
         while current_start < end_ts:
             print(f"Fetching data from: {datetime.fromtimestamp(current_start / 1000)}")
-            
+
             data_chunk = self._fetch_chunk(current_start)
-            
+
             if not data_chunk or len(data_chunk) == 0:
                 break
-            
+
             all_data.extend(data_chunk)
             last_close_time = data_chunk[-1][6]
             current_start = last_close_time + 1
@@ -74,17 +74,17 @@ class BinanceDataLoader:
 
         # עיבוד ל-DataFrame
         df = pd.DataFrame(all_data, columns=COLUMNS)
-        
+
         # המרת טיפוסי נתונים
         numeric_cols = ['open', 'high', 'low', 'close', 'volume']
         df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, axis=1)
-        
+
         df['open_time'] = pd.to_datetime(df['open_time'], unit='ms')
         df['close_time'] = pd.to_datetime(df['close_time'], unit='ms')
-        
+
         # --- חזרה לשמירה בפורמט CSV ---
         self._save_to_csv(df)
-        
+
         print(f"--- Data Collection Complete. Fetched {len(df)} rows. ---")
         return df
 
@@ -95,9 +95,9 @@ class BinanceDataLoader:
 
 if __name__ == "__main__":
     loader = BinanceDataLoader(symbol='BTCUSDT', interval='5m')
-    
+
     df = loader.fetch_history(start_str='2017-09-09', end_str=None)
-    
+
     expected_file = os.path.join(SAVE_PATH, f"BTCUSDT_{loader.interval}_data.csv")
     if os.path.exists(expected_file):
         print(f"Success! CSV file found at: {expected_file}")

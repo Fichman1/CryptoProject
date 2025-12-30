@@ -7,12 +7,12 @@ import ta # ספריית הניתוח הטכני
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # קובץ הנתונים (5 דקות)
-DATA_PATH = os.path.join(BASE_DIR, 'data', 'BTCUSDT_5m_data.csv') 
+DATA_PATH = os.path.join(BASE_DIR, 'data', 'BTCUSDT_5m_data.csv')
 
 # חלון זמן של יממה שלמה (24 שעות * 12 נרות בשעה)
-SEQ_LENGTH = 288  
+SEQ_LENGTH = 288
 
-PREDICT_AHEAD = 1 
+PREDICT_AHEAD = 1
 TRAIN_SPLIT = 0.8
 VAL_SPLIT = 0.1
 
@@ -27,12 +27,12 @@ class DataPreprocessor:
 
     def load_and_clean_data(self, filepath):
         print(f"Loading data from {filepath}...")
-        
+
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"File not found: {filepath}")
 
         df = pd.read_csv(filepath)
-        
+
         df['open_time'] = pd.to_datetime(df['open_time'])
         df = df.sort_values('open_time')
         df = df.drop_duplicates(subset=['open_time'])
@@ -40,18 +40,18 @@ class DataPreprocessor:
 
         # --- 1. חישוב Log Returns (הלב של המודל) ---
         df['log_ret'] = np.log(df['close'] / df['close'].shift(1))
-        
+
         # --- 2. חישוב אינדיקטורים טכניים (Technical Indicators) ---
-        
+
         # A. RSI (Relative Strength Index) - מומנטום
         # טווח מקורי: 0-100. נחלק ב-100 כדי שיהיה בין 0-1
         df['rsi'] = ta.momentum.rsi(df['close'], window=14) / 100.0
-        
+
         # B. MACD (Moving Average Convergence Divergence) - זיהוי מגמה
         # נשתמש בהפרש (MACD Diff) שמראה את עוצמת המגמה
         macd = ta.trend.MACD(df['close'])
         df['macd'] = macd.macd_diff() # ערכים אלו כבר קטנים יחסית ולכן מתאימים
-        
+
         # C. Bollinger Bands - תנודתיות
         # נשתמש ברוחב הרצועה (Band Width) כדי לדעת אם השוק "רגוע" או "סוער"
         bb = ta.volatility.BollingerBands(df['close'], window=20, window_dev=2)
@@ -59,12 +59,12 @@ class DataPreprocessor:
 
         # --- 3. טיפול ב-Volume ---
         # שימוש בלוג כדי להקטין את המספרים הענקיים
-        df['volume'] = np.log(df['volume'] + 1) 
-        
+        df['volume'] = np.log(df['volume'] + 1)
+
         # האינדיקטורים יוצרים ערכי NaN בהתחלה (כי צריך היסטוריה כדי לחשב אותם)
         # למשל RSI צריך 14 נרות אחורה. אז נמחק את השורות הריקות.
         df = df.dropna()
-        
+
         print(f"Features added: RSI, MACD, BB_Width. Total Rows: {len(df)}")
         return df
 
@@ -96,10 +96,10 @@ class DataPreprocessor:
 
         train_data = data[:train_end]
         train_target = target[:train_end]
-        
+
         val_data = data[train_end:val_end]
         val_target = target[train_end:val_end]
-        
+
         test_data = data[val_end:]
         test_target = target[val_end:]
 
