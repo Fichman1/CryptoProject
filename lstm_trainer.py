@@ -81,6 +81,23 @@ def load_data():
     y_test = np.load(os.path.join(DATA_DIR, 'y_test.npy'))
     return X_train, y_train, X_val, y_val, X_test, y_test
 
+def build_demo_loaders(fraction=0.05):
+    X_train, y_train, X_val, y_val, X_test, y_test = load_data()
+
+    # Subsample
+    train_size = int(len(X_train) * fraction)
+    val_size = int(len(X_val) * fraction)
+    test_size = int(len(X_test) * fraction)
+
+    X_train = X_train[:train_size]
+    y_train = y_train[:train_size]
+    X_val = X_val[:val_size]
+    y_val = y_val[:val_size]
+    X_test = X_test[:test_size]
+    y_test = y_test[:test_size]
+    return X_train, y_train, X_val, y_val, X_test, y_test
+
+
 class DirectionalLogCoshLoss(nn.Module):
     def __init__(self, directional_penalty=0.5):
         super(DirectionalLogCoshLoss, self).__init__()
@@ -102,7 +119,8 @@ def train():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
-    X_train, y_train, X_val, y_val, X_test, y_test = load_data()
+    #X_train, y_train, X_val, y_val, X_test, y_test = load_data()
+    X_train, y_train, X_val, y_val, X_test, y_test = build_demo_loaders()
 
     # --- הטריק: הכפלת המטרה (y) בפקטור ---
     # זה הופך את 0.002 ל-0.2, מספר שהרשת יכולה ללמוד בקלות יותר
