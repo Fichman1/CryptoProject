@@ -73,7 +73,7 @@ class DataPreprocessor:
 
         # האינדיקטורים יוצרים ערכי NaN בהתחלה (כי צריך היסטוריה כדי לחשב אותם)
         # למשל RSI צריך 14 נרות אחורה. אז נמחק את השורות הריקות.
-        df = df.dropna(inplace=True)
+        df = df.dropna()
 
         print(f"Features added: RSI, MACD, BB_Width. Total Rows: {len(df)}")
         return df
