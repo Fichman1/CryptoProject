@@ -274,6 +274,36 @@ def train():
         figsize=(14, 8),
         tight_layout=True
     )
+    # --- ויזואליזציה 1: גרף תהליך הלמידה (Loss) ---
+    # מראה האם המודל למד והאם היה Overfitting
+    plt.figure(figsize=(10, 5))
+    plt.plot(train_losses, label='Train Loss')
+    plt.plot(val_losses, label='Validation Loss')
+    plt.title('Training Process (Scaled Huber Loss)')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.show()
+
+
+
+    # --- ויזואליזציה 2: גרף קווי של התחזית מול המציאות ---
+    # מראה את הביצועים על הנתונים הגולמיים (ללא נרות, רק קו)
+    # אנו מתמקדים ב-150 הצעדים הראשונים כדי לראות פרטים
+    plt.figure(figsize=(14, 7))
+    # y_test - המציאות (כחול)
+    plt.plot(y_test[:150], label='Actual Log Return', color='blue', alpha=0.7)
+
+    # predictions - התחזית של המודל (אדום)
+    plt.plot(predictions[:150], label='Predicted Log Return', color='red', linewidth=1.5)
+
+    plt.title(f'LSTM Prediction Performance\nRMSE: {rmse:.5f}')
+    plt.xlabel('Time Steps (5m intervals)')
+    plt.ylabel('Log Return Value')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.show()
     print("Visualization displayed.")
 
 if __name__ == "__main__":
