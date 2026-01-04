@@ -25,21 +25,20 @@ DROPOUT = 0.0           # ביטלנו את ה-Dropout כדי לא לאבד מי
 SCALE_FACTOR = 100.0    # פקטור להגדלת המספרים (כדי שהמודל יראה משהו)
 
 class LSTMModel(nn.Module):
-    def __init__(self, input_size, hidden_size=64, num_layers=2, dropout=0.0):
+    def __init__(self, input_size, hidden_size=128, num_layers=2, dropout=0.1):
         super(LSTMModel, self).__init__()
-        # LSTM Layer
+        self.hidden_dim = hidden_size
+        self.num_layers = num_layers
+
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=dropout)
-        # Fully Connected Layer
         self.fc = nn.Linear(hidden_size, 1)
 
     def forward(self, x):
-        h0 = torch.zeros(NUM_LAYERS, x.size(0), HIDDEN_DIM).to(x.device)
-        c0 = torch.zeros(NUM_LAYERS, x.size(0), HIDDEN_DIM).to(x.device)
+        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_dim).to(x.device)
+        c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_dim).to(x.device)
 
         out, _ = self.lstm(x, (h0, c0))
-        # לוקחים את הצעד האחרון
-        out = out[:, -1, :]
-        out = self.fc(out)
+        out = self.fc(out[:, -1, :])
         return out
 
 class EarlyStopping:
@@ -82,6 +81,23 @@ def load_data():
     y_test = np.load(os.path.join(DATA_DIR, 'y_test.npy'))
     return X_train, y_train, X_val, y_val, X_test, y_test
 
+class DirectionalLogCoshLoss(nn.Module):
+    def __init__(self, directional_penalty=0.5):
+        super(DirectionalLogCoshLoss, self).__init__()
+        self.directional_penalty = directional_penalty
+
+    def forward(self, y_pred, y_true):
+        # 1. Log-Cosh Loss
+        # log(cosh(x)) is smooth and robust to outliers
+        loss = torch.log(torch.cosh(y_pred - y_true + 1e-12))
+
+        # 2. Directional Penalty
+        # If signs are different, product is negative
+        # We penalize when sign(pred) != sign(true)
+        penalty = torch.where(y_pred * y_true < 0, self.directional_penalty, 0.0)
+
+        return torch.mean(loss + penalty)
+
 def train():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
@@ -108,9 +124,9 @@ def train():
 
     model = LSTMModel(input_size=X_train.shape[2], hidden_size=HIDDEN_DIM,
                       num_layers=NUM_LAYERS, dropout=DROPOUT).to(device)
-
-    # --- שינוי קריטי: שימוש ב-HuberLoss ---
-    criterion = nn.HuberLoss(delta=1.0)
+    # NEW LOSS FUNCTION
+    # 0.5 is the penalty weight; you can increase this to 1.0 if the model still misses directions
+    criterion = DirectionalLogCoshLoss(directional_penalty=0.5)
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
     early_stopping = EarlyStopping(patience=7, verbose=True)

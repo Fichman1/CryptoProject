@@ -50,16 +50,18 @@ class DataPreprocessor:
         # B. MACD (Moving Average Convergence Divergence) - זיהוי מגמה
         # נשתמש בהפרש (MACD Diff) שמראה את עוצמת המגמה
         macd = ta.trend.MACD(df['close'])
-        df['macd'] = macd.macd_diff() # ערכים אלו כבר קטנים יחסית ולכן מתאימים
+        macd_raw = macd.macd_diff()
+        df['macd'] = (macd_raw - macd_raw.rolling(window=100).mean()) / (macd_raw.rolling(window=100).std() + 1e-9)
 
         # C. Bollinger Bands - תנודתיות
         # נשתמש ברוחב הרצועה (Band Width) כדי לדעת אם השוק "רגוע" או "סוער"
         bb = ta.volatility.BollingerBands(df['close'], window=20, window_dev=2)
-        df['bb_width'] = bb.bollinger_wband()
+        df['bb_width'] = bb.bollinger_pband()
 
         # --- 3. טיפול ב-Volume ---
-        # שימוש בלוג כדי להקטין את המספרים הענקיים
+        # Log scaling volume is good, but we also standardize it to match the other features
         df['volume'] = np.log(df['volume'] + 1)
+        df['volume'] = (df['volume'] - df['volume'].mean()) / (df['volume'].std() + 1e-9)
 
         # האינדיקטורים יוצרים ערכי NaN בהתחלה (כי צריך היסטוריה כדי לחשב אותם)
         # למשל RSI צריך 14 נרות אחורה. אז נמחק את השורות הריקות.
