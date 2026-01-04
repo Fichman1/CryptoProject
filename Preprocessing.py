@@ -18,7 +18,7 @@ VAL_SPLIT = 0.1
 
 # --- רשימת הפיצ'רים המעודכנת ---
 # המודל יקבל עכשיו 5 נתונים בכל צעד זמן במקום 2
-FEATURE_COLS = ['log_ret', 'rsi', 'rsi_change', 'macd_diff', 'macd_slope', 'bb_pband_change', 'volume']
+FEATURE_COLS = ['log_ret', 'rsi', 'rsi_change', 'macd', 'macd_slope', 'bb_pband_change', 'volume']
 TARGET_COL = 'log_ret'
 
 class DataPreprocessor:
