@@ -18,7 +18,7 @@ MODEL_DIR = os.path.join(BASE_DIR, 'models')
 # --- Fine Tuning Hyperparameters ---
 BATCH_SIZE = 16         # הקטנו כדי להוסיף רעש חיובי לאימון
 EPOCHS = 50
-LEARNING_RATE = 0.0005  # הקטנו קצת כדי שהלימוד יהיה עדין יותר
+LEARNING_RATE = 0.001  # הקטנו קצת כדי שהלימוד יהיה עדין יותר
 HIDDEN_DIM = 128        # הגדלנו את "המוח" של המודל
 NUM_LAYERS = 2
 DROPOUT = 0.0           # ביטלנו את ה-Dropout כדי לא לאבד מידע עדין
@@ -147,6 +147,9 @@ def train():
     criterion = DirectionalLogCoshLoss(directional_penalty=0.5)
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
+    # Learning Rate Scheduler
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
+
     early_stopping = EarlyStopping(patience=7, verbose=True)
 
     print("Starting training (with Target Scaling * 100)...")
@@ -175,7 +178,10 @@ def train():
         val_loss /= len(val_loader.dataset)
         val_losses.append(val_loss)
 
+        scheduler.step(val_loss)
+
         print(f'Epoch {epoch+1}/{EPOCHS}, Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f}')
+        print(f'Current LR: {optimizer.param_groups[0]["lr"]}')
 
         early_stopping(val_loss, model)
         if early_stopping.early_stop:
@@ -216,7 +222,7 @@ def train():
     # --- B. Reconstruct Indices to match Preprocessing.py ---
     # We must replicate the split logic to find exactly which candles are in the Test Set
     # Note: Ensure these match the constants in Preprocessing.py
-    SEQ_LENGTH = 288
+    SEQ_LENGTH = 120
     TRAIN_SPLIT = 0.8
     VAL_SPLIT = 0.1
 
