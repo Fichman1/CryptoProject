@@ -21,7 +21,7 @@ EPOCHS = 50
 LEARNING_RATE = 0.001  # הקטנו קצת כדי שהלימוד יהיה עדין יותר
 HIDDEN_DIM = 128        # הגדלנו את "המוח" של המודל
 NUM_LAYERS = 2
-DROPOUT = 0.0           # ביטלנו את ה-Dropout כדי לא לאבד מידע עדין
+DROPOUT = 0.2          # ביטלנו את ה-Dropout כדי לא לאבד מידע עדין
 SCALE_FACTOR = 100.0    # פקטור להגדלת המספרים (כדי שהמודל יראה משהו)
 
 class LSTMModel(nn.Module):
@@ -120,7 +120,7 @@ def train():
     print(f"Using device: {device}")
 
     #X_train, y_train, X_val, y_val, X_test, y_test = load_data()
-    X_train, y_train, X_val, y_val, X_test, y_test = build_demo_loaders()
+    X_train, y_train, X_val, y_val, X_test, y_test = build_demo_loaders(0.5)
 
     # --- הטריק: הכפלת המטרה (y) בפקטור ---
     # זה הופך את 0.002 ל-0.2, מספר שהרשת יכולה ללמוד בקלות יותר
@@ -148,7 +148,7 @@ def train():
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
     # Learning Rate Scheduler
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
 
     early_stopping = EarlyStopping(patience=7, verbose=True)
 

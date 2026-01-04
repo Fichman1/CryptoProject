@@ -10,7 +10,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_PATH = os.path.join(BASE_DIR, 'data', 'BTCUSDT_5m_data.csv')
 
 # חלון זמן של יממה שלמה (24 שעות * 12 נרות בשעה)
-SEQ_LENGTH = 288
+SEQ_LENGTH = 120
 
 PREDICT_AHEAD = 1
 TRAIN_SPLIT = 0.8
@@ -18,7 +18,7 @@ VAL_SPLIT = 0.1
 
 # --- רשימת הפיצ'רים המעודכנת ---
 # המודל יקבל עכשיו 5 נתונים בכל צעד זמן במקום 2
-FEATURE_COLS = ['log_ret', 'volume', 'rsi', 'macd', 'bb_width']
+FEATURE_COLS = ['log_ret', 'rsi', 'rsi_change', 'macd_diff', 'macd_slope', 'bb_pband_change', 'volume']
 TARGET_COL = 'log_ret'
 
 class DataPreprocessor:
@@ -46,18 +46,26 @@ class DataPreprocessor:
         # A. RSI (Relative Strength Index) - מומנטום
         # טווח מקורי: 0-100. נחלק ב-100 כדי שיהיה בין 0-1
         df['rsi'] = ta.momentum.rsi(df['close'], window=14) / 100.0
-
+        df['rsi_change'] = df['rsi'].diff(periods=3) # Change in RSI over last 3 periods
         # B. MACD (Moving Average Convergence Divergence) - זיהוי מגמה
         # נשתמש בהפרש (MACD Diff) שמראה את עוצמת המגמה
         macd = ta.trend.MACD(df['close'])
         macd_raw = macd.macd_diff()
         df['macd'] = (macd_raw - macd_raw.rolling(window=100).mean()) / (macd_raw.rolling(window=100).std() + 1e-9)
+        df['macd_diff'] = macd.macd_diff()
+        df['macd_slope'] = df['macd_diff'].diff(periods=2) # Velocity of trend change
 
         # C. Bollinger Bands - תנודתיות
         # נשתמש ברוחב הרצועה (Band Width) כדי לדעת אם השוק "רגוע" או "סוער"
         bb = ta.volatility.BollingerBands(df['close'], window=20, window_dev=2)
         df['bb_width'] = bb.bollinger_pband()
+        df['bb_pband_change'] = df['bb_width'].diff(periods=1)
 
+
+        # Log Returns and Direction (Sign)
+        df['log_ret'] = np.log(df['close'] / df['close'].shift(1))
+        # Optional: Add a 'lagged' return so the model sees recent volatility
+        df['log_ret_lag'] = df['log_ret'].shift(1)
         # --- 3. טיפול ב-Volume ---
         # Log scaling volume is good, but we also standardize it to match the other features
         df['volume'] = np.log(df['volume'] + 1)
