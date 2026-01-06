@@ -20,11 +20,11 @@ if not os.path.exists(MODEL_DIR):
         os.makedirs(MODEL_DIR)
 
 # --- Fine Tuning Hyperparameters ---
-BATCH_SIZE = 32         # הקטנו כדי להוסיף רעש חיובי לאימון
+BATCH_SIZE = 16         # הקטנו כדי להוסיף רעש חיובי לאימון
 EPOCHS = 100
 LEARNING_RATE = 0.0005  # הקטנו קצת כדי שהלימוד יהיה עדין יותר
-HIDDEN_DIM = 256        # הגדלנו את "המוח" של המודל
-NUM_LAYERS = 3
+HIDDEN_DIM = 128        # הגדלנו את "המוח" של המודל
+NUM_LAYERS = 2
 DROPOUT = 0      # ביטלנו את ה-Dropout כדי לא לאבד מידע עדין
 
 class LSTMModel(nn.Module):
@@ -175,7 +175,7 @@ def train():
     model = LSTMModel(input_size=N_features, hidden_size=HIDDEN_DIM, num_layers=NUM_LAYERS, dropout=DROPOUT).to(device)
     
     criterion = DirectionalLogCoshLoss(directional_penalty=2) # עונש כיווני חזק יותר
-    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.001)
+    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.1)
 
     # --- REDUCE LR ON PLATEAU אגרסיבי ---
     # מחכה רק 3 אפוקים (Patience) וחותך את ה-LR ב-70% (Factor=0.3)
