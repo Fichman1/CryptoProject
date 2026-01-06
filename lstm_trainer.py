@@ -14,6 +14,8 @@ import pandas as pd
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, 'processed_data')
 MODEL_DIR = os.path.join(BASE_DIR, 'models')
+if not os.path.exists(MODEL_DIR):
+        os.makedirs(MODEL_DIR)
 
 # --- Fine Tuning Hyperparameters ---
 BATCH_SIZE = 16         # הקטנו כדי להוסיף רעש חיובי לאימון
