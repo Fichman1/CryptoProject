@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import mplfinance as mpf
 import pandas as pd
+from sklearn.preprocessing import StandardScaler
+import ta
 # import joblib # לא בשימוש כרגע כי אנחנו עובדים עם לוג ללא סקיילר
 
 # --- הגדרות ---
@@ -24,7 +26,6 @@ LEARNING_RATE = 0.001  # הקטנו קצת כדי שהלימוד יהיה עדי
 HIDDEN_DIM = 128        # הגדלנו את "המוח" של המודל
 NUM_LAYERS = 2
 DROPOUT = 0.2          # ביטלנו את ה-Dropout כדי לא לאבד מידע עדין
-SCALE_FACTOR = 100.0    # פקטור להגדלת המספרים (כדי שהמודל יראה משהו)
 
 class LSTMModel(nn.Module):
     def __init__(self, input_size, hidden_size=128, num_layers=2, dropout=0.1):
@@ -42,6 +43,7 @@ class LSTMModel(nn.Module):
         out, _ = self.lstm(x, (h0, c0))
         out = self.fc(out[:, -1, :])
         return out
+
 
 class EarlyStopping:
     def __init__(self, patience=7, verbose=False, delta=0):
@@ -117,42 +119,59 @@ class DirectionalLogCoshLoss(nn.Module):
 
         return torch.mean(loss + penalty)
 
+
+
 def train():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
+    # 1. טעינת הנתונים הגולמיים
     #X_train, y_train, X_val, y_val, X_test, y_test = load_data()
     X_train, y_train, X_val, y_val, X_test, y_test = build_demo_loaders(0.5)
 
-    # --- הטריק: הכפלת המטרה (y) בפקטור ---
-    # זה הופך את 0.002 ל-0.2, מספר שהרשת יכולה ללמוד בקלות יותר
-    y_train = y_train * SCALE_FACTOR
-    y_val = y_val * SCALE_FACTOR
-    # את הטסט לא נשנה עכשיו, נטפל בזה בהערכה
+    # --- שיפור קריטי: נרמול (Standardization) ---
+    # אנחנו מנרמלים את כל הפיצ'רים כדי שכולם יהיו באותה סקאלה (Mean=0, Std=1)
+    # זה מונע מה-Volume "לחנוק" את ה-Log Returns הקטנים
+    scaler = StandardScaler()
+    
+    # משטחים את הנתונים לצורך נרמול ומחזירים לצורה המקורית
+    N_samples, Seq_len, N_features = X_train.shape
+    X_train_reshaped = X_train.reshape(-1, N_features)
+    X_train_scaled = scaler.fit_transform(X_train_reshaped).reshape(N_samples, Seq_len, N_features)
+    
+    # משתמשים באותו סקיילר (Fit על Train בלבד!) עבור Val ו-Test
+    X_val_scaled = scaler.transform(X_val.reshape(-1, N_features)).reshape(X_val.shape)
+    X_test_scaled = scaler.transform(X_test.reshape(-1, N_features)).reshape(X_test.shape)
 
+    # --- הסרת ה-SCALE_FACTOR הידני ---
+    # המודל ילמד את ה-y המקורי. Log-Cosh יודע להתמודד עם זה.
+    
     # המרה ל-Tensors
-    X_train = torch.tensor(X_train, dtype=torch.float32).to(device)
-    y_train = torch.tensor(y_train, dtype=torch.float32).to(device)
-    X_val = torch.tensor(X_val, dtype=torch.float32).to(device)
-    y_val = torch.tensor(y_val, dtype=torch.float32).to(device)
-    X_test = torch.tensor(X_test, dtype=torch.float32).to(device)
-    # y_test נשאר ב-CPU ובגודל המקורי להשוואה בסוף
+    X_train_tensor = torch.tensor(X_train_scaled, dtype=torch.float32).to(device)
+    y_train_tensor = torch.tensor(y_train, dtype=torch.float32).to(device)
+    X_val_tensor = torch.tensor(X_val_scaled, dtype=torch.float32).to(device)
+    y_val_tensor = torch.tensor(y_val, dtype=torch.float32).to(device)
+    X_test_tensor = torch.tensor(X_test_scaled, dtype=torch.float32).to(device)
 
-    train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=BATCH_SIZE, shuffle=True)
-    val_loader = DataLoader(TensorDataset(X_val, y_val), batch_size=BATCH_SIZE, shuffle=False)
-    test_loader = DataLoader(TensorDataset(X_test), batch_size=BATCH_SIZE, shuffle=False)
+    train_loader = DataLoader(TensorDataset(X_train_tensor, y_train_tensor), batch_size=BATCH_SIZE, shuffle=True)
+    val_loader = DataLoader(TensorDataset(X_val_tensor, y_val_tensor), batch_size=BATCH_SIZE, shuffle=False)
+    test_loader = DataLoader(TensorDataset(X_test_tensor), batch_size=BATCH_SIZE, shuffle=False)
 
-    model = LSTMModel(input_size=X_train.shape[2], hidden_size=HIDDEN_DIM,
-                      num_layers=NUM_LAYERS, dropout=DROPOUT).to(device)
-    # NEW LOSS FUNCTION
-    # 0.5 is the penalty weight; you can increase this to 1.0 if the model still misses directions
-    criterion = DirectionalLogCoshLoss(directional_penalty=0.5)
-    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    # מודל קטן יותר (2 שכבות, 64 יחידות) כדי למנוע Underfitting עצלן
+    model = LSTMModel(input_size=N_features, hidden_size=HIDDEN_DIM, num_layers=NUM_LAYERS, dropout=DROPOUT).to(device)
+    
+    criterion = DirectionalLogCoshLoss(directional_penalty=0.8) # עונש כיווני חזק יותר
+    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-5)
 
-    # Learning Rate Scheduler
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
+    # --- REDUCE LR ON PLATEAU אגרסיבי ---
+    # מחכה רק 3 אפוקים (Patience) וחותך את ה-LR ב-70% (Factor=0.3)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.6, patience=3, threshold=1e-5
+    )
 
     early_stopping = EarlyStopping(patience=7, verbose=True)
+
+    # ... (המשך לולאת האימון כפי שהיה, רק בלי חלוקה ב-SCALE_FACTOR בסוף) ...
 
     print("Starting training (with Target Scaling * 100)...")
     train_losses, val_losses = [], []
@@ -204,8 +223,7 @@ def train():
     predictions = np.array(predictions)
 
     # --- חלוקה חזרה בפקטור ---
-    # אנחנו מחזירים את התחזית לגודל המקורי כדי להשוות למציאות
-    predictions = predictions / SCALE_FACTOR
+    
 
     # חישוב מדדים על המידע המקורי
     rmse = np.sqrt(mean_squared_error(y_test, predictions))
@@ -240,19 +258,17 @@ def train():
     # We limit it to the number of predictions we actually have
     df_test_candles = df_full.iloc[test_start_index : test_start_index + len(predictions)].copy()
 
-    # --- C. Reconstruct Real Predicted Prices ---
-    # Model predicted Log Returns: ln(P_t / P_{t-1})
-    # To get Price: P_t = P_{t-1} * exp(prediction)
-    # We use the 'close' from the PREVIOUS step (shift(1)) as the base
+   # --- C. שחזור מחיר חזוי מתוך Bollinger %B ---
+    # אנחנו צריכים את הרצועות המקוריות כדי להמיר מ-0..1 חזרה למחיר בדולרים
+    bb = ta.volatility.BollingerBands(df_full['close'], window=20, window_dev=2)
+    upper_band = bb.bollinger_hband().iloc[test_start_index : test_start_index + len(predictions)].values
+    lower_band = bb.bollinger_lband().iloc[test_start_index : test_start_index + len(predictions)].values
 
-    previous_closes = df_full.iloc[test_start_index-1 : test_start_index + len(predictions)-1]['close'].values
-
-    # Calculate Predicted Price
-    predicted_prices = previous_closes * np.exp(predictions)
+    # נוסחת השחזור: מחיר = רצועה תחתונה + (תחזית * רוחב הרצועות)
+    predicted_prices = lower_band + (np.array(predictions) * (upper_band - lower_band))
 
     # Add to DataFrame for plotting
     df_test_candles['Predicted_Close'] = predicted_prices
-
     # --- D. Plotting with mplfinance ---
     # We zoom in on the first 150 candles for clarity
     ZOOM_SAMPLES = 150
@@ -300,9 +316,9 @@ def train():
     # predictions - התחזית של המודל (אדום)
     plt.plot(predictions[:150], label='Predicted Log Return', color='red', linewidth=1.5)
 
-    plt.title(f'LSTM Prediction Performance\nRMSE: {rmse:.5f}')
+    plt.title(f'LSTM Prediction Performance (Bollinger %B)\nRMSE: {rmse:.5f}')
     plt.xlabel('Time Steps (5m intervals)')
-    plt.ylabel('Log Return Value')
+    plt.ylabel('Bollinger %B Value (0-1)')
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.show()
