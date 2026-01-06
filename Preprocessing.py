@@ -21,9 +21,9 @@ STEP = 5
 
 # --- רשימת הפיצ'רים המעודכנת ---
 # המודל יקבל עכשיו 5 נתונים בכל צעד זמן במקום 2
-FEATURE_COLS = ['log_ret', 'rsi', 'rsi_change','rsi_accel', 'macd', 'macd_slope', 'bb_pband_change', 'volume', 'ma_dist', 'volume_z', 'vol_spike']
+FEATURE_COLS = ['log_ret', 'rsi', 'rsi_change','rsi_accel', 'macd', 'macd_slope', 'bb_pband_change', 'volume', 'ma_dist', 'volume_z', 'vol_spike', 'adx']
 #TARGET_COL = 'log_ret'
-TARGET_COL = 'bb_pband' # במקום 'log_ret'
+TARGET_COL = 'target_smooth' # במקום 'log_ret'
 
 class DataPreprocessor:
     def __init__(self):
@@ -117,6 +117,13 @@ class DataPreprocessor:
         # אנחנו רוצים שהערך בזמן t יהיה הממוצע של t+1, t+2, t+3
         df['target_smooth'] = df['bb_pband'].rolling(window=3).mean().shift(-3)
 
+        # --- הוספת אינדיקטור עוצמת טרנד (ADX) ---
+        # ADX עוזר למודל להבדיל בין "רעש" (דשדוש) לבין טרנד אמיתי
+        adx = ta.trend.ADXIndicator(df['high'], df['low'], df['close'], window=14)
+        df['adx'] = adx.adx()
+        
+        # הוסף את 'adx' לרשימת ה-FEATURE_COLS למעלה!
+        # self.FEATURE_COLS = [..., 'adx']
         # האינדיקטורים יוצרים ערכי NaN בהתחלה (כי צריך היסטוריה כדי לחשב אותם)
         # למשל RSI צריך 14 נרות אחורה. אז נמחק את השורות הריקות.
         df = df.dropna()

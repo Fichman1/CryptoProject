@@ -25,7 +25,7 @@ EPOCHS = 100
 LEARNING_RATE = 0.0005  # הקטנו קצת כדי שהלימוד יהיה עדין יותר
 HIDDEN_DIM = 128        # הגדלנו את "המוח" של המודל
 NUM_LAYERS = 2
-DROPOUT = 0      # ביטלנו את ה-Dropout כדי לא לאבד מידע עדין
+DROPOUT = 0.1     # ביטלנו את ה-Dropout כדי לא לאבד מידע עדין
 
 class LSTMModel(nn.Module):
     def __init__(self, input_size, hidden_size=128, num_layers=2, dropout=0.1):
@@ -120,20 +120,29 @@ class DirectionalLogCoshLoss(nn.Module):
         return torch.mean(loss + penalty)
 
 # --- פונקציה לחישוב דיוק כיווני ---
-def calculate_directional_accuracy(y_true, y_pred):
-    # המרת הערכים לכיוונים: 1 אם המחיר עלה (גדול מהקודם), 0 אם ירד
-    true_direction = np.sign(np.diff(y_true))
-    pred_direction = np.sign(np.diff(y_pred))
+def calculate_directional_accuracy(y_true, y_pred, threshold=0.001):
+    # חישוב השינוי באחוזים
+    true_change = np.diff(y_true) / y_true[:-1]
+    pred_change = np.diff(y_pred) / y_pred[:-1]
     
-    # השוואה: כמה פעמים הכיוון היה זהה?
-    correct_directions = np.sum(true_direction == pred_direction)
-    total_moves = len(true_direction)
+    # מסנן: נחשב דיוק רק כשהמודל חזה שינוי משמעותי (מעל הסף)
+    # זה מדמה מסחר אמיתי: אנחנו לא נכנסים לעסקה על כל פיפס קטן
+    significant_moves_mask = np.abs(pred_change) > threshold
     
-    accuracy = (correct_directions / total_moves) * 100
-    print(f"\n--- Directional Accuracy: {accuracy:.2f}% ---")
+    if np.sum(significant_moves_mask) == 0:
+        print("No significant moves predicted.")
+        return 0.0
 
+    # סינון הנתונים
+    true_direction = np.sign(true_change[significant_moves_mask])
+    pred_direction = np.sign(pred_change[significant_moves_mask])
+    
+    correct = np.sum(true_direction == pred_direction)
+    total = len(true_direction)
+    
+    accuracy = (correct / total) * 100
+    print(f"\n--- Accuracy on Strong Moves (Threshold {threshold}): {accuracy:.2f}% ({total}/{len(y_pred)} candles) ---")
     return accuracy
-
 
 def train():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -175,12 +184,12 @@ def train():
     model = LSTMModel(input_size=N_features, hidden_size=HIDDEN_DIM, num_layers=NUM_LAYERS, dropout=DROPOUT).to(device)
     
     criterion = DirectionalLogCoshLoss(directional_penalty=2) # עונש כיווני חזק יותר
-    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.1)
+    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
 
     # --- REDUCE LR ON PLATEAU אגרסיבי ---
     # מחכה רק 3 אפוקים (Patience) וחותך את ה-LR ב-70% (Factor=0.3)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.7, patience=4, threshold=1e-5,min_lr=1e-5
+        optimizer, mode='min', factor=0.7, patience=7, threshold=1e-5,min_lr=0.0001
     )
 
     early_stopping = EarlyStopping(patience=25, verbose=True, delta=1e-6)
