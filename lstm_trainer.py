@@ -89,12 +89,12 @@ def build_demo_loaders(fraction=0.05):
     val_size = int(len(X_val) * fraction)
     test_size = int(len(X_test) * fraction)
 
-    X_train = X_train[:train_size]
-    y_train = y_train[:train_size]
-    X_val = X_val[:val_size]
-    y_val = y_val[:val_size]
-    X_test = X_test[:test_size]
-    y_test = y_test[:test_size]
+    X_train = X_train[-train_size:]
+    y_train = y_train[-train_size:]
+    X_val = X_val[-val_size:]
+    y_val = y_val[-val_size:]
+    X_test = X_test[-test_size:]
+    y_test = y_test[-test_size:]
     return X_train, y_train, X_val, y_val, X_test, y_test
 
 
