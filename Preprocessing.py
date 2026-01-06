@@ -21,7 +21,7 @@ STEP = 5
 
 # --- רשימת הפיצ'רים המעודכנת ---
 # המודל יקבל עכשיו 5 נתונים בכל צעד זמן במקום 2
-FEATURE_COLS = ['log_ret', 'log_ret_lag_2', 'rsi', 'rsi_change', 'macd', 'macd_slope', 'bb_pband_change', 'volume', 'volume_z', 'vol_spike']
+FEATURE_COLS = ['log_ret', 'rsi', 'rsi_change','rsi_accel', 'macd', 'macd_slope', 'bb_pband_change', 'volume', 'ma_dist', 'volume_z', 'vol_spike']
 #TARGET_COL = 'log_ret'
 TARGET_COL = 'bb_pband' # במקום 'log_ret'
 
@@ -67,6 +67,9 @@ class DataPreprocessor:
         # טווח מקורי: 0-100. נחלק ב-100 כדי שיהיה בין 0-1
         df['rsi'] = ta.momentum.rsi(df['close'], window=14) / 100.0
         df['rsi_change'] = df['rsi'].diff(periods=3) # Change in RSI over last 3 periods
+        # 2. מחשבים את ה-Momentum Acceleration (השינוי של השינוי)
+        # זה עוזר לזהות מתי המומנטום מתחיל לצבור תאוצה או להיחלש
+        df['rsi_accel'] = df['rsi_change'].diff(periods=2)
         # B. MACD (Moving Average Convergence Divergence) - זיהוי מגמה
         # נשתמש בהפרש (MACD Diff) שמראה את עוצמת המגמה
         macd = ta.trend.MACD(df['close'])
@@ -99,6 +102,16 @@ class DataPreprocessor:
         
         # Binary Spike: 1 אם הנפח גבוה פי 2 מהממוצע, אחרת 0
         df['vol_spike'] = (df['volume'] > (df['vol_ma'] * 2)).astype(float)
+
+        # --- חישוב מרחק מהממוצע (Moving Average Distance) ---
+        # מחשבים ממוצע נע ל-20 תקופות
+        df['ma_20'] = df['close'].rolling(window=20).mean()
+        
+        # המרחק באחוזים: (מחיר נוכחי - ממוצע) / ממוצע
+        df['ma_dist'] = (df['close'] - df['ma_20']) / (df['ma_20'] + 1e-9)
+        
+        # נרמול זריז כדי שהערך יהיה בסקאלה דומה לשאר הפיצ'רים
+        df['ma_dist'] = df['ma_dist'] * 10.0
 
         # האינדיקטורים יוצרים ערכי NaN בהתחלה (כי צריך היסטוריה כדי לחשב אותם)
         # למשל RSI צריך 14 נרות אחורה. אז נמחק את השורות הריקות.

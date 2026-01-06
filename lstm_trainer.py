@@ -20,11 +20,11 @@ if not os.path.exists(MODEL_DIR):
         os.makedirs(MODEL_DIR)
 
 # --- Fine Tuning Hyperparameters ---
-BATCH_SIZE = 16         # הקטנו כדי להוסיף רעש חיובי לאימון
-EPOCHS = 50
-LEARNING_RATE = 0.001  # הקטנו קצת כדי שהלימוד יהיה עדין יותר
-HIDDEN_DIM = 128        # הגדלנו את "המוח" של המודל
-NUM_LAYERS = 2
+BATCH_SIZE = 32         # הקטנו כדי להוסיף רעש חיובי לאימון
+EPOCHS = 100
+LEARNING_RATE = 0.0005  # הקטנו קצת כדי שהלימוד יהיה עדין יותר
+HIDDEN_DIM = 256        # הגדלנו את "המוח" של המודל
+NUM_LAYERS = 3
 DROPOUT = 0.2          # ביטלנו את ה-Dropout כדי לא לאבד מידע עדין
 
 class LSTMModel(nn.Module):
@@ -126,8 +126,8 @@ def train():
     print(f"Using device: {device}")
 
     # 1. טעינת הנתונים הגולמיים
-    #X_train, y_train, X_val, y_val, X_test, y_test = load_data()
-    X_train, y_train, X_val, y_val, X_test, y_test = build_demo_loaders(0.5)
+    X_train, y_train, X_val, y_val, X_test, y_test = load_data()
+    #X_train, y_train, X_val, y_val, X_test, y_test = build_demo_loaders(0.5)
 
     # --- שיפור קריטי: נרמול (Standardization) ---
     # אנחנו מנרמלים את כל הפיצ'רים כדי שכולם יהיו באותה סקאלה (Mean=0, Std=1)
@@ -160,16 +160,16 @@ def train():
     # מודל קטן יותר (2 שכבות, 64 יחידות) כדי למנוע Underfitting עצלן
     model = LSTMModel(input_size=N_features, hidden_size=HIDDEN_DIM, num_layers=NUM_LAYERS, dropout=DROPOUT).to(device)
     
-    criterion = DirectionalLogCoshLoss(directional_penalty=0.8) # עונש כיווני חזק יותר
+    criterion = DirectionalLogCoshLoss(directional_penalty=2) # עונש כיווני חזק יותר
     optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-5)
 
     # --- REDUCE LR ON PLATEAU אגרסיבי ---
     # מחכה רק 3 אפוקים (Patience) וחותך את ה-LR ב-70% (Factor=0.3)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.6, patience=3, threshold=1e-5
+        optimizer, mode='min', factor=0.5, patience=4, threshold=1e-5,min_lr=1e-6
     )
 
-    early_stopping = EarlyStopping(patience=7, verbose=True)
+    early_stopping = EarlyStopping(patience=25, verbose=True, delta=1e-6)
 
     # ... (המשך לולאת האימון כפי שהיה, רק בלי חלוקה ב-SCALE_FACTOR בסוף) ...
 
@@ -265,13 +265,13 @@ def train():
     lower_band = bb.bollinger_lband().iloc[test_start_index : test_start_index + len(predictions)].values
 
     # נוסחת השחזור: מחיר = רצועה תחתונה + (תחזית * רוחב הרצועות)
-    predicted_prices = lower_band + (np.array(predictions) * (upper_band - lower_band))
+    predicted_bb_price = lower_band + (np.array(predictions) * (upper_band - lower_band))
 
     # Add to DataFrame for plotting
-    df_test_candles['Predicted_Close'] = predicted_prices
+    df_test_candles['Predicted_Close'] = pd.Series(predicted_bb_price).rolling(window=3).mean().fillna(method='bfill').values
     # --- D. Plotting with mplfinance ---
     # We zoom in on the first 150 candles for clarity
-    ZOOM_SAMPLES = 150
+    ZOOM_SAMPLES = 576
     df_plot = df_test_candles.head(ZOOM_SAMPLES)
 
     # Create the overlay plot (The predicted price line)
@@ -311,10 +311,10 @@ def train():
     # אנו מתמקדים ב-150 הצעדים הראשונים כדי לראות פרטים
     plt.figure(figsize=(14, 7))
     # y_test - המציאות (כחול)
-    plt.plot(y_test[:150], label='Actual Log Return', color='blue', alpha=0.7)
+    plt.plot(y_test[:576], label='Actual Log Return', color='blue', alpha=0.7)
 
     # predictions - התחזית של המודל (אדום)
-    plt.plot(predictions[:150], label='Predicted Log Return', color='red', linewidth=1.5)
+    plt.plot(predictions[:576], label='Predicted Log Return', color='red', linewidth=1.5)
 
     plt.title(f'LSTM Prediction Performance (Bollinger %B)\nRMSE: {rmse:.5f}')
     plt.xlabel('Time Steps (5m intervals)')
