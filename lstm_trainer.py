@@ -25,7 +25,7 @@ EPOCHS = 100
 LEARNING_RATE = 0.0005  # הקטנו קצת כדי שהלימוד יהיה עדין יותר
 HIDDEN_DIM = 256        # הגדלנו את "המוח" של המודל
 NUM_LAYERS = 3
-DROPOUT = 0.2          # ביטלנו את ה-Dropout כדי לא לאבד מידע עדין
+DROPOUT = 0      # ביטלנו את ה-Dropout כדי לא לאבד מידע עדין
 
 class LSTMModel(nn.Module):
     def __init__(self, input_size, hidden_size=128, num_layers=2, dropout=0.1):
@@ -119,6 +119,20 @@ class DirectionalLogCoshLoss(nn.Module):
 
         return torch.mean(loss + penalty)
 
+# --- פונקציה לחישוב דיוק כיווני ---
+def calculate_directional_accuracy(y_true, y_pred):
+    # המרת הערכים לכיוונים: 1 אם המחיר עלה (גדול מהקודם), 0 אם ירד
+    true_direction = np.sign(np.diff(y_true))
+    pred_direction = np.sign(np.diff(y_pred))
+    
+    # השוואה: כמה פעמים הכיוון היה זהה?
+    correct_directions = np.sum(true_direction == pred_direction)
+    total_moves = len(true_direction)
+    
+    accuracy = (correct_directions / total_moves) * 100
+    print(f"\n--- Directional Accuracy: {accuracy:.2f}% ---")
+
+    return accuracy
 
 
 def train():
@@ -126,8 +140,8 @@ def train():
     print(f"Using device: {device}")
 
     # 1. טעינת הנתונים הגולמיים
-    X_train, y_train, X_val, y_val, X_test, y_test = load_data()
-    #X_train, y_train, X_val, y_val, X_test, y_test = build_demo_loaders(0.5)
+    #X_train, y_train, X_val, y_val, X_test, y_test = load_data()
+    X_train, y_train, X_val, y_val, X_test, y_test = build_demo_loaders(0.5)
 
     # --- שיפור קריטי: נרמול (Standardization) ---
     # אנחנו מנרמלים את כל הפיצ'רים כדי שכולם יהיו באותה סקאלה (Mean=0, Std=1)
@@ -161,12 +175,12 @@ def train():
     model = LSTMModel(input_size=N_features, hidden_size=HIDDEN_DIM, num_layers=NUM_LAYERS, dropout=DROPOUT).to(device)
     
     criterion = DirectionalLogCoshLoss(directional_penalty=2) # עונש כיווני חזק יותר
-    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-5)
+    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.001)
 
     # --- REDUCE LR ON PLATEAU אגרסיבי ---
     # מחכה רק 3 אפוקים (Patience) וחותך את ה-LR ב-70% (Factor=0.3)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.5, patience=4, threshold=1e-5,min_lr=1e-6
+        optimizer, mode='min', factor=0.7, patience=4, threshold=1e-5,min_lr=1e-5
     )
 
     early_stopping = EarlyStopping(patience=25, verbose=True, delta=1e-6)
@@ -323,6 +337,14 @@ def train():
     plt.grid(True, alpha=0.3)
     plt.show()
     print("Visualization displayed.")
+
+   
+        # --- הוסף את הקריאה הזו בסוף פונקציית train, אחרי חישוב ה-RMSE ---
+    # שים לב: אנחנו שולחים את המחירים המשוחזרים (predicted_prices) ואת המחירים האמיתיים
+    actual_prices = df_test_candles['close'].values
+    # predicted_prices כבר מחושב אצלך בקוד הויזואליזציה
+    calculate_directional_accuracy(actual_prices, predicted_bb_price)
+
 
 if __name__ == "__main__":
     train()
