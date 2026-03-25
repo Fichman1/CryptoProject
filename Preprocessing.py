@@ -37,7 +37,7 @@ class DataPreprocessor:
         # חישוב מטריצת הקורלציה בין הפיצ'רים
         corr_matrix = df[feature_cols].corr()
         print(corr_matrix)
-        
+
         print("\nHigh correlations (>0.8 or <-0.8) may indicate redundancy:")
         for i in range(len(feature_cols)):
             for j in range(i+1, len(feature_cols)):
@@ -96,20 +96,20 @@ class DataPreprocessor:
         df['volume'] = (df['volume'] - df['volume'].mean()) / (df['volume'].std() + 1e-9)
         df['vol_ma'] = df['volume'].rolling(window=20).mean()
         df['vol_std'] = df['volume'].rolling(window=20).std()
-        
+
         # Z-Score של הנפח: כמה סטיות תקן הנפח הנוכחי רחוק מהממוצע
         df['volume_z'] = (df['volume'] - df['vol_ma']) / (df['vol_std'] + 1e-9)
-        
+
         # Binary Spike: 1 אם הנפח גבוה פי 2 מהממוצע, אחרת 0
         df['vol_spike'] = (df['volume'] > (df['vol_ma'] * 2)).astype(float)
 
         # --- חישוב מרחק מהממוצע (Moving Average Distance) ---
         # מחשבים ממוצע נע ל-20 תקופות
         df['ma_20'] = df['close'].rolling(window=20).mean()
-        
+
         # המרחק באחוזים: (מחיר נוכחי - ממוצע) / ממוצע
         df['ma_dist'] = (df['close'] - df['ma_20']) / (df['ma_20'] + 1e-9)
-        
+
         # נרמול זריז כדי שהערך יהיה בסקאלה דומה לשאר הפיצ'רים
         df['ma_dist'] = df['ma_dist'] * 10.0
 
@@ -121,7 +121,7 @@ class DataPreprocessor:
         # ADX עוזר למודל להבדיל בין "רעש" (דשדוש) לבין טרנד אמיתי
         adx = ta.trend.ADXIndicator(df['high'], df['low'], df['close'], window=14)
         df['adx'] = adx.adx()
-        
+
         # הוסף את 'adx' לרשימת ה-FEATURE_COLS למעלה!
         # self.FEATURE_COLS = [..., 'adx']
         # האינדיקטורים יוצרים ערכי NaN בהתחלה (כי צריך היסטוריה כדי לחשב אותם)
@@ -137,11 +137,11 @@ class DataPreprocessor:
         for i in range(0, len(data) - seq_length - PREDICT_AHEAD + 1, step):
             # ה-X מכיל את ההיסטוריה עד הנקודה הנוכחית
             x = data[i : (i + seq_length)]
-            
+
             # ה-y הוא בדיוק הנר שאנחנו רוצים לחזות בעתיד
             # למשל: אם seq_length=120 ו-predict_ahead=1, נחזה את נר 121
             y = target[i + seq_length + PREDICT_AHEAD - 1]
-            
+
             xs.append(x)
             ys.append(y)
         return np.array(xs), np.array(ys)
@@ -179,8 +179,8 @@ class DataPreprocessor:
         # אנחנו מאמנים את הסקיילר רק על נתוני ה-Train כדי למנוע Data Leakage
         scaler = StandardScaler()
         train_data_scaled = scaler.fit_transform(train_data)
-        
-        
+
+
         # משתמשים באותו סקיילר עבור ה-Validation וה-Test
         val_data_scaled = scaler.transform(val_data)
         test_data_scaled = scaler.transform(test_data)
@@ -205,7 +205,7 @@ class DataPreprocessor:
         np.save(os.path.join(save_dir, 'y_test.npy'), y_test)
 
         print("--- Preprocessing Complete (Normalized & Sequenced) ---")
-        print(f"X_train shape: {X_train.shape}") 
+        print(f"X_train shape: {X_train.shape}")
         print(f"X_test shape: {X_test.shape}")
 
 if __name__ == "__main__":
