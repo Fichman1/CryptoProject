@@ -124,11 +124,11 @@ def calculate_directional_accuracy(y_true, y_pred, threshold=0.001):
     # חישוב השינוי באחוזים
     true_change = np.diff(y_true) / y_true[:-1]
     pred_change = np.diff(y_pred) / y_pred[:-1]
-    
+
     # מסנן: נחשב דיוק רק כשהמודל חזה שינוי משמעותי (מעל הסף)
     # זה מדמה מסחר אמיתי: אנחנו לא נכנסים לעסקה על כל פיפס קטן
     significant_moves_mask = np.abs(pred_change) > threshold
-    
+
     if np.sum(significant_moves_mask) == 0:
         print("No significant moves predicted.")
         return 0.0
@@ -136,10 +136,10 @@ def calculate_directional_accuracy(y_true, y_pred, threshold=0.001):
     # סינון הנתונים
     true_direction = np.sign(true_change[significant_moves_mask])
     pred_direction = np.sign(pred_change[significant_moves_mask])
-    
+
     correct = np.sum(true_direction == pred_direction)
     total = len(true_direction)
-    
+
     accuracy = (correct / total) * 100
     print(f"\n--- Accuracy on Strong Moves (Threshold {threshold}): {accuracy:.2f}% ({total}/{len(y_pred)} candles) ---")
     return accuracy
@@ -156,19 +156,19 @@ def train():
     # אנחנו מנרמלים את כל הפיצ'רים כדי שכולם יהיו באותה סקאלה (Mean=0, Std=1)
     # זה מונע מה-Volume "לחנוק" את ה-Log Returns הקטנים
     scaler = StandardScaler()
-    
+
     # משטחים את הנתונים לצורך נרמול ומחזירים לצורה המקורית
     N_samples, Seq_len, N_features = X_train.shape
     X_train_reshaped = X_train.reshape(-1, N_features)
     X_train_scaled = scaler.fit_transform(X_train_reshaped).reshape(N_samples, Seq_len, N_features)
-    
+
     # משתמשים באותו סקיילר (Fit על Train בלבד!) עבור Val ו-Test
     X_val_scaled = scaler.transform(X_val.reshape(-1, N_features)).reshape(X_val.shape)
     X_test_scaled = scaler.transform(X_test.reshape(-1, N_features)).reshape(X_test.shape)
 
     # --- הסרת ה-SCALE_FACTOR הידני ---
     # המודל ילמד את ה-y המקורי. Log-Cosh יודע להתמודד עם זה.
-    
+
     # המרה ל-Tensors
     X_train_tensor = torch.tensor(X_train_scaled, dtype=torch.float32).to(device)
     y_train_tensor = torch.tensor(y_train, dtype=torch.float32).to(device)
@@ -182,7 +182,7 @@ def train():
 
     # מודל קטן יותר (2 שכבות, 64 יחידות) כדי למנוע Underfitting עצלן
     model = LSTMModel(input_size=N_features, hidden_size=HIDDEN_DIM, num_layers=NUM_LAYERS, dropout=DROPOUT).to(device)
-    
+
     criterion = DirectionalLogCoshLoss(directional_penalty=2) # עונש כיווני חזק יותר
     optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
 
@@ -246,7 +246,7 @@ def train():
     predictions = np.array(predictions)
 
     # --- חלוקה חזרה בפקטור ---
-    
+
 
     # חישוב מדדים על המידע המקורי
     rmse = np.sqrt(mean_squared_error(y_test, predictions))
@@ -347,7 +347,7 @@ def train():
     plt.show()
     print("Visualization displayed.")
 
-   
+
         # --- הוסף את הקריאה הזו בסוף פונקציית train, אחרי חישוב ה-RMSE ---
     # שים לב: אנחנו שולחים את המחירים המשוחזרים (predicted_prices) ואת המחירים האמיתיים
     actual_prices = df_test_candles['close'].values
