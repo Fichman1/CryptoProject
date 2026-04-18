@@ -14,7 +14,7 @@ except:
     BASE_DIR = os.getcwd()
 
 # --- סרגל צד לבחירת מודל ---
-st.sidebar.title("Settings")
+st.sidebar.title("הגדרות (Settings)")
 model_choice = st.sidebar.selectbox(
     "בחר מודל להצגה:",
     ("Transformer (TFT)", "LSTM")
@@ -46,7 +46,7 @@ def load_data(path):
 df = load_data(DATA_PATH)
 
 if df is None:
-    st.warning(f"⚠️ לא נמצא קובץ נתונים עבור {model_choice}. וודא שהרצת את האימון המתאים.")
+    st.warning(f"⚠️ לא נמצא קובץ נתונים עבור {model_choice}. וודא שהרצת את האימון שלו ושהקובץ '{file_name}' נמצא בתיקייה.")
 else:
     # מדדים (Metrics)
     latest_price = df['close'].iloc[-1]
