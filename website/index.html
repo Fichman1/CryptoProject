@@ -74,11 +74,15 @@
 <body>
     <div class="container">
         <h1>🚀 Crypto AI Prediction Dashboard</h1>
+        
+        <!-- Setup Warning: Hidden automatically when keys are filled -->
         <div id="setup" class="setup-warning">
             <h3 style="margin-top: 0; color: #ffcc00;">⚠️ Developer Setup Required</h3>
-            <p>Please enter your <strong>supabase_url</strong> and <strong>publishable_key</strong> (starting with <code>sb_publishable_</code>) in the <code>index.html</code> source code.</p>
+            <p>Please enter your <strong>Supabase URL</strong> and <strong>Publishable Key</strong> in the <code>index.html</code> source code.</p>
         </div>
-        <div id="loading" style="display: none;">Loading live predictions from Supabase...</div>
+
+        <div id="loading" style="display: none;">Connecting to Supabase...</div>
+
         <div id="content" style="display: none;">
             <div class="metrics">
                 <div class="metric">
@@ -102,6 +106,7 @@
                 <canvas id="predictionChart"></canvas>
             </div>
         </div>
+
         <div class="footer">
             Data updated every 5 minutes from Binance API. Models: LSTM & TFT via Supabase.
         </div>
@@ -114,7 +119,10 @@
         const SUPABASE_URL = 'https://iphxmjltsigsaocicipu.supabase.co';
         const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_4clMLjZVc1oacTPOb5XrUA_w9T5aevj';
 
-        if (SUPABASE_URL && !SUPABASE_URL.includes('YOUR_SUPABASE')) {
+        // Check if user has replaced the placeholder values
+        const isSetupComplete = SUPABASE_URL && !SUPABASE_URL.includes('YOUR_SUPABASE');
+
+        if (isSetupComplete) {
             document.getElementById('setup').style.display = 'none';
             document.getElementById('loading').style.display = 'block';
         }
@@ -123,7 +131,7 @@
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 
         async function fetchPredictions() {
-            if (!SUPABASE_URL || SUPABASE_URL.includes('YOUR_SUPABASE')) return;
+            if (!isSetupComplete) return;
 
             try {
                 // Fetch the single row where id = 1
@@ -133,51 +141,59 @@
                     .eq('id', 1)
                     .single();
 
-                if (error) throw error;
-
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('content').style.display = 'block';
-
-                const payload = data.payload;
-                const lastPrice = payload.last_price;
-                const chosenModel = payload.chosen_model;
-                const prediction = payload.predictions[chosenModel];
-
-                document.getElementById('last-price').innerText = `$${lastPrice.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
-                document.getElementById('chosen-model').innerText = chosenModel;
-
-                if (prediction) {
-                    const predPrice = prediction.price;
-                    const changePct = prediction.change_pct;
-
-                    document.getElementById('pred-price').innerText = `$${predPrice.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
-                    document.getElementById('change-pct').innerText = `${changePct > 0 ? '+' : ''}${changePct.toFixed(2)}%`;
-                    document.getElementById('change-pct').className = changePct > 0 ? 'signal-long' : 'signal-short';
-
-                    const signalElem = document.getElementById('signal');
-                    if (changePct > 0.1) {
-                        signalElem.innerText = 'LONG';
-                        signalElem.className = 'signal-long';
-                    } else if (changePct < -0.1) {
-                        signalElem.innerText = 'SHORT';
-                        signalElem.className = 'signal-short';
-                    } else {
-                        signalElem.innerText = 'NEUTRAL';
-                        signalElem.className = 'signal-neutral';
+                if (error) {
+                    if (error.code === 'PGRST116') {
+                        // Row not found - This is normal if the orchestrator hasn't run yet
+                        document.getElementById('loading').innerText = '⏳ Waiting for first prediction from Colab engine...';
+                        return;
                     }
+                    throw error;
+                }
 
-                    updateChart(lastPrice, payload.predictions);
+                if (data && data.payload) {
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('content').style.display = 'block';
+                    
+                    const payload = data.payload;
+                    const lastPrice = payload.last_price;
+                    const chosenModel = payload.chosen_model;
+                    const prediction = payload.predictions[chosenModel];
+                    
+                    document.getElementById('last-price').innerText = `$${lastPrice.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+                    document.getElementById('chosen-model').innerText = chosenModel;
+                    
+                    if (prediction) {
+                        const predPrice = prediction.price;
+                        const changePct = prediction.change_pct;
+                        
+                        document.getElementById('pred-price').innerText = `$${predPrice.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+                        document.getElementById('change-pct').innerText = `${changePct > 0 ? '+' : ''}${changePct.toFixed(2)}%`;
+                        document.getElementById('change-pct').className = changePct > 0 ? 'signal-long' : 'signal-short';
+                        
+                        const signalElem = document.getElementById('signal');
+                        if (changePct > 0.1) {
+                            signalElem.innerText = 'LONG';
+                            signalElem.className = 'signal-long';
+                        } else if (changePct < -0.1) {
+                            signalElem.innerText = 'SHORT';
+                            signalElem.className = 'signal-short';
+                        } else {
+                            signalElem.innerText = 'NEUTRAL';
+                            signalElem.className = 'signal-neutral';
+                        }
+
+                        updateChart(lastPrice, payload.predictions);
+                    }
                 }
             } catch (error) {
-                console.error('Error fetching predictions:', error);
-                document.getElementById('loading').innerText = 'Error connecting to Supabase. Check console logs and verify your table and keys.';
+                console.error('Supabase Error:', error);
+                document.getElementById('loading').innerText = '❌ Connection Error. Check Supabase table "predictions" and RLS policies.';
             }
         }
 
         let myChart;
         function updateChart(lastPrice, predictions) {
             const ctx = document.getElementById('predictionChart').getContext('2d');
-
             const labels = ['Current', 'Predicted (Next 5m)'];
             const datasets = [];
 
@@ -204,32 +220,17 @@
             }
 
             if (myChart) myChart.destroy();
-
             myChart = new Chart(ctx, {
                 type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: datasets
-                },
+                data: { labels: labels, datasets: datasets },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
                     scales: {
-                        y: {
-                            beginAtZero: false,
-                            grid: { color: '#333' },
-                            ticks: { color: '#aaa' }
-                        },
-                        x: {
-                            grid: { color: '#333' },
-                            ticks: { color: '#aaa' }
-                        }
+                        y: { grid: { color: '#333' }, ticks: { color: '#aaa' } },
+                        x: { grid: { color: '#333' }, ticks: { color: '#aaa' } }
                     },
-                    plugins: {
-                        legend: {
-                            labels: { color: '#e0e0e0' }
-                        }
-                    }
+                    plugins: { legend: { labels: { color: '#e0e0e0' } } }
                 }
             });
         }
