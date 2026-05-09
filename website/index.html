@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Crypto AI Predictions</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <!-- Supabase JS -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         body {
@@ -74,8 +73,7 @@
 <body>
     <div class="container">
         <h1>🚀 Crypto AI Prediction Dashboard</h1>
-        
-        <!-- Setup Warning: Hidden automatically when keys are filled -->
+
         <div id="setup" class="setup-warning">
             <h3 style="margin-top: 0; color: #ffcc00;">⚠️ Developer Setup Required</h3>
             <p>Please enter your <strong>Supabase URL</strong> and <strong>Publishable Key</strong> in the <code>index.html</code> source code.</p>
@@ -108,7 +106,7 @@
         </div>
 
         <div class="footer">
-            Data updated every 5 minutes from Binance API. Models: LSTM & TFT via Supabase.
+            Data updated every 30 seconds from Binance API. Models: LSTM & TFT via Supabase.
         </div>
     </div>
 
@@ -117,12 +115,12 @@
         // ⚠️ INSERT YOUR SUPABASE DETAILS HERE ⚠️
         // ==========================================
         const SUPABASE_URL = 'https://iphxmjltsigsaocicipu.supabase.co';
-        const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_4clMLjZVc1oacTPOb5XrUA_w9T5aevj';
+        const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_4clMLjZVc1oacTPOb5XrUA_w9T5aevj'; // Ensure this matches your screenshot
 
-        // Fix logic to hide warning
-        const isSetupComplete = SUPABASE_URL && 
-                                SUPABASE_URL !== 'YOUR_SUPABASE_PROJECT_URL' && 
-                                SUPABASE_PUBLISHABLE_KEY !== 'YOUR_SUPABASE_PUBLISHABLE_KEY';
+        // Updated check to support the new sb_publishable_ format
+        const isSetupComplete = SUPABASE_URL &&
+                                SUPABASE_PUBLISHABLE_KEY &&
+                                (SUPABASE_PUBLISHABLE_KEY.startsWith('sb_publishable_') || SUPABASE_PUBLISHABLE_KEY.startsWith('eyJ'));
 
         if (isSetupComplete) {
             document.getElementById('setup').style.display = 'none';
@@ -131,6 +129,7 @@
 
         // Initialize Supabase Client
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+        let myChart;
 
         async function fetchPredictions() {
             if (!isSetupComplete) return;
@@ -145,47 +144,15 @@
 
                 if (error) {
                     if (error.code === 'PGRST116') {
-                        // Row not found - This is normal if the orchestrator hasn't run yet
-                        document.getElementById('loading').innerText = '⏳ Waiting for first prediction from Colab engine...';
+                        // Row not found
+                        document.getElementById('loading').innerText = '⏳ Waiting for first prediction from engine...';
                         return;
                     }
                     throw error;
                 }
 
                 if (data && data.payload) {
-                    document.getElementById('loading').style.display = 'none';
-                    document.getElementById('content').style.display = 'block';
-                    
-                    const payload = data.payload;
-                    const lastPrice = payload.last_price;
-                    const chosenModel = payload.chosen_model;
-                    const prediction = payload.predictions[chosenModel];
-                    
-                    document.getElementById('last-price').innerText = `$${lastPrice.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
-                    document.getElementById('chosen-model').innerText = chosenModel;
-                    
-                    if (prediction) {
-                        const predPrice = prediction.price;
-                        const changePct = prediction.change_pct;
-                        
-                        document.getElementById('pred-price').innerText = `$${predPrice.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
-                        document.getElementById('change-pct').innerText = `${changePct > 0 ? '+' : ''}${changePct.toFixed(2)}%`;
-                        document.getElementById('change-pct').className = changePct > 0 ? 'signal-long' : 'signal-short';
-                        
-                        const signalElem = document.getElementById('signal');
-                        if (changePct > 0.1) {
-                            signalElem.innerText = 'LONG';
-                            signalElem.className = 'signal-long';
-                        } else if (changePct < -0.1) {
-                            signalElem.innerText = 'SHORT';
-                            signalElem.className = 'signal-short';
-                        } else {
-                            signalElem.innerText = 'NEUTRAL';
-                            signalElem.className = 'signal-neutral';
-                        }
-
-                        updateChart(lastPrice, payload.predictions);
-                    }
+                    renderDashboard(data.payload);
                 }
             } catch (error) {
                 console.error('Supabase Error:', error);
@@ -193,10 +160,44 @@
             }
         }
 
-        let myChart;
+        function renderDashboard(payload) {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('content').style.display = 'block';
+
+            const lastPrice = payload.last_price;
+            const chosenModel = payload.chosen_model;
+            const prediction = payload.predictions[chosenModel];
+
+            document.getElementById('last-price').innerText = `$${lastPrice.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+            document.getElementById('chosen-model').innerText = chosenModel;
+
+            if (prediction) {
+                const predPrice = prediction.price;
+                const changePct = prediction.change_pct;
+
+                document.getElementById('pred-price').innerText = `$${predPrice.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+                document.getElementById('change-pct').innerText = `${changePct > 0 ? '+' : ''}${changePct.toFixed(2)}%`;
+                document.getElementById('change-pct').className = changePct > 0 ? 'signal-long' : 'signal-short';
+
+                const signalElem = document.getElementById('signal');
+                if (changePct > 0.1) {
+                    signalElem.innerText = 'LONG';
+                    signalElem.className = 'signal-long';
+                } else if (changePct < -0.1) {
+                    signalElem.innerText = 'SHORT';
+                    signalElem.className = 'signal-short';
+                } else {
+                    signalElem.innerText = 'NEUTRAL';
+                    signalElem.className = 'signal-neutral';
+                }
+
+                updateChart(lastPrice, payload.predictions);
+            }
+        }
+
         function updateChart(lastPrice, predictions) {
             const ctx = document.getElementById('predictionChart').getContext('2d');
-            const labels = ['Current', 'Predicted (Next 5m)'];
+            const labels = ['Current', 'Predicted (Next)'];
             const datasets = [];
 
             if (predictions.LSTM) {
