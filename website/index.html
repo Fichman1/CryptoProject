@@ -119,8 +119,10 @@
         const SUPABASE_URL = 'https://iphxmjltsigsaocicipu.supabase.co';
         const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_4clMLjZVc1oacTPOb5XrUA_w9T5aevj';
 
-        // Check if user has replaced the placeholder values
-        const isSetupComplete = SUPABASE_URL && !SUPABASE_URL.includes('YOUR_SUPABASE');
+        // Fix logic to hide warning
+        const isSetupComplete = SUPABASE_URL && 
+                                SUPABASE_URL !== 'YOUR_SUPABASE_PROJECT_URL' && 
+                                SUPABASE_PUBLISHABLE_KEY !== 'YOUR_SUPABASE_PUBLISHABLE_KEY';
 
         if (isSetupComplete) {
             document.getElementById('setup').style.display = 'none';
