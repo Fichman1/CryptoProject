@@ -7,72 +7,27 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #121212;
-            color: #e0e0e0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 20px;
-        }
-        .container {
-            width: 90%;
-            max-width: 1000px;
-            background-color: #1e1e1e;
-            padding: 20px;
-            border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-        }
-        h1 {
-            color: #4A90E2;
-            margin-bottom: 10px;
-        }
-        .metrics {
-            display: flex;
-            justify-content: space-around;
-            margin-bottom: 20px;
-            padding: 15px;
-            background-color: #252525;
-            border-radius: 8px;
-        }
-        .metric {
-            text-align: center;
-        }
-        .metric small {
-            color: #888;
-            font-size: 0.9em;
-        }
-        .metric b {
-            display: block;
-            font-size: 1.4em;
-            margin-top: 5px;
-        }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #121212; color: #e0e0e0; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+        .container { width: 90%; max-width: 1000px; background-color: #1e1e1e; padding: 20px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+        h1 { color: #4A90E2; margin-bottom: 10px; }
+        .metrics { display: flex; justify-content: space-around; margin-bottom: 20px; padding: 15px; background-color: #252525; border-radius: 8px; }
+        .metric { text-align: center; }
+        .metric small { color: #888; font-size: 0.9em; }
+        .metric b { display: block; font-size: 1.4em; margin-top: 5px; }
         .signal-long { color: #00ff00; }
         .signal-short { color: #ff4444; }
         .signal-neutral { color: #aaaaaa; }
-        #chart-container {
-            position: relative;
-            height: 400px;
-            width: 100%;
-        }
-        .footer {
-            margin-top: 20px;
-            font-size: 0.8em;
-            color: #666;
-        }
-        .setup-warning {
-            background-color: #332200;
-            border: 1px solid #ffcc00;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-        }
+        #chart-container { position: relative; height: 400px; width: 100%; }
+        .footer { margin-top: 20px; font-size: 0.8em; color: #666; }
+        .setup-warning { background-color: #332200; border: 1px solid #ffcc00; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+        .error-box { background-color: #440000; border: 1px solid #ff0000; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: none; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🚀 Crypto AI Prediction Dashboard</h1>
+
+        <div id="error-display" class="error-box"></div>
 
         <div id="setup" class="setup-warning">
             <h3 style="margin-top: 0; color: #ffcc00;">⚠️ Developer Setup Required</h3>
@@ -83,165 +38,120 @@
 
         <div id="content" style="display: none;">
             <div class="metrics">
-                <div class="metric">
-                    <small>Last Price</small>
-                    <b id="last-price">$0.00</b>
-                </div>
-                <div class="metric">
-                    <small>AI Prediction (<span id="chosen-model">...</span>)</small>
-                    <b id="pred-price">$0.00</b>
-                </div>
-                <div class="metric">
-                    <small>Expected Change</small>
-                    <b id="change-pct">+0.00%</b>
-                </div>
-                <div class="metric">
-                    <small>Signal</small>
-                    <b id="signal">NEUTRAL</b>
-                </div>
+                <div class="metric"><small>Last Price</small><b id="last-price">$0.00</b></div>
+                <div class="metric"><small>AI Prediction (<span id="chosen-model">...</span>)</small><b id="pred-price">$0.00</b></div>
+                <div class="metric"><small>Expected Change</small><b id="change-pct">+0.00%</b></div>
+                <div class="metric"><small>Signal</small><b id="signal">NEUTRAL</b></div>
             </div>
-            <div id="chart-container">
-                <canvas id="predictionChart"></canvas>
-            </div>
+            <div id="chart-container"><canvas id="predictionChart"></canvas></div>
         </div>
 
-        <div class="footer">
-            Data updated every 30 seconds from Binance API. Models: LSTM & TFT via Supabase.
-        </div>
+        <div class="footer">Data updated every 30 seconds from Binance API. Models: LSTM & TFT via Supabase.</div>
     </div>
 
     <script>
+        // Catch global errors and display them on the page
+        window.onerror = function(msg, url, line) {
+            const errBox = document.getElementById('error-display');
+            errBox.style.display = 'block';
+            errBox.innerHTML = `<h3 style="margin-top: 0; color: #ff4444;">🚨 JavaScript Error</h3><p>${msg} (Line ${line})</p><p>Check your F12 Console for more details.</p>`;
+        };
+
         // ==========================================
         // ⚠️ INSERT YOUR SUPABASE DETAILS HERE ⚠️
         // ==========================================
         const SUPABASE_URL = 'https://iphxmjltsigsaocicipu.supabase.co';
-        const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_4clMLjZVc1oacTPOb5XrUA_w9T5aevj'; // Ensure this matches your screenshot
 
-        // Updated check to support the new sb_publishable_ format
-        const isSetupComplete = SUPABASE_URL &&
-                                SUPABASE_PUBLISHABLE_KEY &&
-                                (SUPABASE_PUBLISHABLE_KEY.startsWith('sb_publishable_') || SUPABASE_PUBLISHABLE_KEY.startsWith('eyJ'));
+        // PASTE YOUR FULL KEY HERE - Make sure you keep the single quotes around it!
+        const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_4clMLjZVc1oacTPOb5XrUA_w9T5aevj';
+
+        const cleanUrl = SUPABASE_URL.trim();
+        const cleanKey = SUPABASE_PUBLISHABLE_KEY.trim();
+
+        // Check if the key looks somewhat valid (starts with sb_ or eyJ and is long enough)
+        const isSetupComplete = cleanUrl.startsWith('http') &&
+                                cleanKey.length > 30 &&
+                                (cleanKey.startsWith('sb_publishable_') || cleanKey.startsWith('eyJ'));
 
         if (isSetupComplete) {
             document.getElementById('setup').style.display = 'none';
             document.getElementById('loading').style.display = 'block';
-        }
 
-        // Initialize Supabase Client
-        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
-        let myChart;
+            // Initialize Supabase
+            const supabase = window.supabase.createClient(cleanUrl, cleanKey);
+            let myChart;
 
-        async function fetchPredictions() {
-            if (!isSetupComplete) return;
+            async function fetchPredictions() {
+                try {
+                    const { data, error } = await supabase.from('predictions').select('payload').eq('id', 1).single();
 
-            try {
-                // Fetch the single row where id = 1
-                const { data, error } = await supabase
-                    .from('predictions')
-                    .select('payload')
-                    .eq('id', 1)
-                    .single();
-
-                if (error) {
-                    if (error.code === 'PGRST116') {
-                        // Row not found
-                        document.getElementById('loading').innerText = '⏳ Waiting for first prediction from engine...';
-                        return;
+                    if (error) {
+                        if (error.code === 'PGRST116') {
+                            document.getElementById('loading').innerText = '⏳ Waiting for first prediction from Colab engine...';
+                            return;
+                        }
+                        throw error;
                     }
-                    throw error;
-                }
 
-                if (data && data.payload) {
-                    renderDashboard(data.payload);
+                    if (data && data.payload) {
+                        renderDashboard(data.payload);
+                    }
+                } catch (error) {
+                    console.error('Supabase Error:', error);
+                    document.getElementById('loading').innerText = `❌ Supabase Connection Error: ${error.message || 'Check network / RLS policies.'}`;
                 }
-            } catch (error) {
-                console.error('Supabase Error:', error);
-                document.getElementById('loading').innerText = '❌ Connection Error. Check Supabase table "predictions" and RLS policies.';
             }
-        }
 
-        function renderDashboard(payload) {
-            document.getElementById('loading').style.display = 'none';
-            document.getElementById('content').style.display = 'block';
+            function renderDashboard(payload) {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('content').style.display = 'block';
 
-            const lastPrice = payload.last_price;
-            const chosenModel = payload.chosen_model;
-            const prediction = payload.predictions[chosenModel];
+                const lastPrice = payload.last_price;
+                const chosenModel = payload.chosen_model;
+                const prediction = payload.predictions[chosenModel];
 
-            document.getElementById('last-price').innerText = `$${lastPrice.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
-            document.getElementById('chosen-model').innerText = chosenModel;
+                document.getElementById('last-price').innerText = `$${lastPrice.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+                document.getElementById('chosen-model').innerText = chosenModel;
 
-            if (prediction) {
-                const predPrice = prediction.price;
-                const changePct = prediction.change_pct;
+                if (prediction) {
+                    const predPrice = prediction.price;
+                    const changePct = prediction.change_pct;
 
-                document.getElementById('pred-price').innerText = `$${predPrice.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
-                document.getElementById('change-pct').innerText = `${changePct > 0 ? '+' : ''}${changePct.toFixed(2)}%`;
-                document.getElementById('change-pct').className = changePct > 0 ? 'signal-long' : 'signal-short';
+                    document.getElementById('pred-price').innerText = `$${predPrice.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+                    document.getElementById('change-pct').innerText = `${changePct > 0 ? '+' : ''}${changePct.toFixed(2)}%`;
+                    document.getElementById('change-pct').className = changePct > 0 ? 'signal-long' : 'signal-short';
 
-                const signalElem = document.getElementById('signal');
-                if (changePct > 0.1) {
-                    signalElem.innerText = 'LONG';
-                    signalElem.className = 'signal-long';
-                } else if (changePct < -0.1) {
-                    signalElem.innerText = 'SHORT';
-                    signalElem.className = 'signal-short';
-                } else {
-                    signalElem.innerText = 'NEUTRAL';
-                    signalElem.className = 'signal-neutral';
+                    const signalElem = document.getElementById('signal');
+                    if (changePct > 0.1) {
+                        signalElem.innerText = 'LONG'; signalElem.className = 'signal-long';
+                    } else if (changePct < -0.1) {
+                        signalElem.innerText = 'SHORT'; signalElem.className = 'signal-short';
+                    } else {
+                        signalElem.innerText = 'NEUTRAL'; signalElem.className = 'signal-neutral';
+                    }
+
+                    updateChart(lastPrice, payload.predictions);
                 }
-
-                updateChart(lastPrice, payload.predictions);
             }
-        }
 
-        function updateChart(lastPrice, predictions) {
-            const ctx = document.getElementById('predictionChart').getContext('2d');
-            const labels = ['Current', 'Predicted (Next)'];
-            const datasets = [];
+            function updateChart(lastPrice, predictions) {
+                const ctx = document.getElementById('predictionChart').getContext('2d');
+                const datasets = [];
 
-            if (predictions.LSTM) {
-                datasets.push({
-                    label: 'LSTM Prediction',
-                    data: [lastPrice, predictions.LSTM.price],
-                    borderColor: '#ffcc00',
-                    borderDash: [5, 5],
-                    fill: false,
-                    tension: 0.1
+                if (predictions.LSTM) datasets.push({ label: 'LSTM', data: [lastPrice, predictions.LSTM.price], borderColor: '#ffcc00', borderDash: [5, 5], fill: false, tension: 0.1 });
+                if (predictions.Transformer) datasets.push({ label: 'Transformer', data: [lastPrice, predictions.Transformer.price], borderColor: '#4A90E2', borderDash: [5, 5], fill: false, tension: 0.1 });
+
+                if (myChart) myChart.destroy();
+                myChart = new Chart(ctx, {
+                    type: 'line',
+                    data: { labels: ['Current', 'Predicted'], datasets: datasets },
+                    options: { responsive: true, maintainAspectRatio: false, scales: { y: { grid: { color: '#333' }, ticks: { color: '#aaa' } }, x: { grid: { color: '#333' }, ticks: { color: '#aaa' } } }, plugins: { legend: { labels: { color: '#e0e0e0' } } } }
                 });
             }
 
-            if (predictions.Transformer) {
-                datasets.push({
-                    label: 'Transformer Prediction',
-                    data: [lastPrice, predictions.Transformer.price],
-                    borderColor: '#4A90E2',
-                    borderDash: [5, 5],
-                    fill: false,
-                    tension: 0.1
-                });
-            }
-
-            if (myChart) myChart.destroy();
-            myChart = new Chart(ctx, {
-                type: 'line',
-                data: { labels: labels, datasets: datasets },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: { grid: { color: '#333' }, ticks: { color: '#aaa' } },
-                        x: { grid: { color: '#333' }, ticks: { color: '#aaa' } }
-                    },
-                    plugins: { legend: { labels: { color: '#e0e0e0' } } }
-                }
-            });
+            fetchPredictions();
+            setInterval(fetchPredictions, 30000);
         }
-
-        // Initial fetch
-        fetchPredictions();
-        // Poll every 30 seconds
-        setInterval(fetchPredictions, 30000);
     </script>
 </body>
 </html>
