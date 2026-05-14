@@ -52,9 +52,9 @@
 
             <div class="controls">
                 <span>Resolution:</span>
-                <button class="btn active" onclick="setResolution('5m')">5m</button>
-                <button class="btn" onclick="setResolution('1h')">1h</button>
-                <button class="btn" onclick="setResolution('1d')">1d (All Time)</button>
+                <button class="btn active" onclick="setResolution('5m', this)">5m</button>
+                <button class="btn" onclick="setResolution('1h', this)">1h</button>
+                <button class="btn" onclick="setResolution('1d', this)">1d (All Time)</button>
             </div>
 
             <div class="chart-wrapper" id="scroll-container">
@@ -64,7 +64,7 @@
             </div>
         </div>
 
-        <div class="footer">Data updated every 30 seconds. Chart is scrollable sideways to view history.</div>
+        <div class="footer">Data updated every 30 seconds. Chart is scrollable sideways to view history. <span id="last-sync" style="color: #4A90E2; float: right;"></span></div>
     </div>
 
     <script>
@@ -84,7 +84,9 @@
 
             async function fetchPredictions() {
                 try {
-                    const { data, error } = await supabase.from('predictions').select('payload').eq('id', 1).single();
+                    console.log(`[${new Date().toLocaleTimeString()}] Polling Supabase for new data...`);
+                    // Using a dummy filter to bust aggressive browser caching
+                    const { data, error } = await supabase.from('predictions').select('payload').eq('id', 1).neq('id', Math.random()).single();
                     if (error) {
                         if (error.code === 'PGRST116') {
                             document.getElementById('loading').innerText = '⏳ Waiting for first prediction from Colab engine...';
@@ -94,6 +96,7 @@
                     }
                     if (data && data.payload) {
                         globalPayload = data.payload;
+                        document.getElementById('last-sync').innerText = `Last Sync: ${new Date().toLocaleTimeString()}`;
                         renderDashboard();
                     }
                 } catch (error) {
@@ -102,10 +105,10 @@
                 }
             }
 
-            function setResolution(res) {
+            function setResolution(res, btn) {
                 currentResolution = res;
                 document.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
-                event.target.classList.add('active');
+                if (btn) btn.classList.add('active');
                 
                 // Adjust chart width for daily (less points) vs 5m (many points)
                 const parent = document.getElementById('chart-parent');
@@ -150,8 +153,6 @@
                 const labels = history.map(h => h.t);
                 const dataPoints = history.map(h => h.p);
                 
-                // Add the prediction point to the end
-                const lastPrice = globalPayload.last_price;
                 labels.push("NEXT");
                 
                 const datasets = [
@@ -166,19 +167,28 @@
                     }
                 ];
 
-                const lastIdx = dataPoints.length;
-                if (globalPayload.predictions.LSTM) {
-                    const lstmLine = new Array(lastIdx).fill(null);
-                    lstmLine[lastIdx - 1] = lastPrice;
-                    lstmLine.push(globalPayload.predictions.LSTM.price);
-                    datasets.push({ label: 'LSTM Prediction', data: lstmLine, borderColor: '#ffcc00', borderDash: [5, 5], pointRadius: 4, fill: false });
-                }
+                if (globalPayload.pred_history) {
+                    const timeKey = currentResolution === '5m' ? 't_5m' : (currentResolution === '1h' ? 't_1h' : 't_1d');
+                    const lstmLine = new Array(labels.length).fill(null);
+                    const tftLine = new Array(labels.length).fill(null);
+                    
+                    globalPayload.pred_history.forEach((pred, index) => {
+                        let labelIdx = labels.indexOf(pred[timeKey]);
+                        
+                        // The latest prediction applies to the future "NEXT" label
+                        if (index === globalPayload.pred_history.length - 1) {
+                            labelIdx = labels.length - 1;
+                            labels[labelIdx] = `NEXT (${pred[timeKey]})`;
+                        }
+                        
+                        if (labelIdx !== -1) {
+                            if (pred.LSTM) lstmLine[labelIdx] = pred.LSTM;
+                            if (pred.Transformer) tftLine[labelIdx] = pred.Transformer;
+                        }
+                    });
 
-                if (globalPayload.predictions.Transformer) {
-                    const tftLine = new Array(lastIdx).fill(null);
-                    tftLine[lastIdx - 1] = lastPrice;
-                    tftLine.push(globalPayload.predictions.Transformer.price);
-                    datasets.push({ label: 'Transformer Prediction', data: tftLine, borderColor: '#ff00ff', borderDash: [5, 5], pointRadius: 4, fill: false });
+                    datasets.push({ label: 'LSTM Prediction History', data: lstmLine, borderColor: '#ffcc00', borderWidth: 2, borderDash: [5, 5], pointRadius: 2, spanGaps: true, fill: false });
+                    datasets.push({ label: 'Transformer Prediction History', data: tftLine, borderColor: '#ff00ff', borderWidth: 2, borderDash: [5, 5], pointRadius: 2, spanGaps: true, fill: false });
                 }
 
                 if (myChart) myChart.destroy();
